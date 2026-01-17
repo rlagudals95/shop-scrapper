@@ -15,6 +15,10 @@ export class MockBrowserClient implements IBrowserClient {
     this.urlToHtml.set(url, html);
   }
 
+  clearAll(): void {
+    this.urlToHtml.clear();
+  }
+
   async getPageContent(url: string): Promise<string> {
     const html = this.urlToHtml.get(url);
     if (!html) {

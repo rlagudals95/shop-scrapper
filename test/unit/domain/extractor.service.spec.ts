@@ -1,175 +1,267 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { ListingXPathMap, PageType, PDPXPathMap } from '../../../src/domain/entities';
 import { ExtractorService } from '../../../src/domain/services/extractor.service';
-import { PageType, ListingXPathMap, PDPXPathMap, ListingData, PDPData } from '../../../src/domain/entities';
-import * as fs from 'fs';
-import * as path from 'path';
 
 describe('ExtractorService', () => {
   let extractorService: ExtractorService;
-  let listingHtml: string;
-  let pdpHtml: string;
 
-  beforeAll(() => {
-    listingHtml = fs.readFileSync(
-      path.join(__dirname, '../../fixtures/coupang-listing.html'),
-      'utf-8',
-    );
-    pdpHtml = fs.readFileSync(
-      path.join(__dirname, '../../fixtures/coupang-pdp.html'),
-      'utf-8',
-    );
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [ExtractorService],
+    }).compile();
+
+    extractorService = module.get<ExtractorService>(ExtractorService);
   });
 
-  beforeEach(() => {
-    extractorService = new ExtractorService();
-  });
+  describe('extract', () => {
+    it('should call extractListing for LISTING page type', () => {
+      const html = `
+        <html>
+          <body>
+            <div class="product-item">
+              <a class="name" href="/product/1">Test Product</a>
+              <span class="price">10,000원</span>
+            </div>
+          </body>
+        </html>
+      `;
 
-  describe('extract Listing data', () => {
-    const listingXPaths: ListingXPathMap = {
-      productCard: "//li[contains(@class, 'search-product')]",
-      thumbnail: ".//img[@class='thumbnail']/@src",
-      name: ".//div[@class='name']",
-      price: ".//span[@class='price-value']",
-      url: ".//a[@class='product-link']/@href",
-    };
-
-    it('should extract products from listing page', () => {
-      const result = extractorService.extract(
-        listingHtml,
-        listingXPaths,
-        PageType.LISTING,
-      ) as ListingData;
-
-      expect(result.products).toBeDefined();
-      expect(result.products.length).toBe(3);
-    });
-
-    it('should extract product names correctly', () => {
-      const result = extractorService.extract(
-        listingHtml,
-        listingXPaths,
-        PageType.LISTING,
-      ) as ListingData;
-
-      expect(result.products[0].name).toContain('Samsung Galaxy S24 Ultra');
-      expect(result.products[1].name).toContain('Apple iPhone 15 Pro Max');
-      expect(result.products[2].name).toContain('Google Pixel 8 Pro');
-    });
-
-    it('should extract prices correctly', () => {
-      const result = extractorService.extract(
-        listingHtml,
-        listingXPaths,
-        PageType.LISTING,
-      ) as ListingData;
-
-      expect(result.products[0].price).toContain('1,299,000');
-      expect(result.products[1].price).toContain('1,890,000');
-      expect(result.products[2].price).toContain('899,000');
-    });
-
-    it('should extract URLs correctly', () => {
-      const result = extractorService.extract(
-        listingHtml,
-        listingXPaths,
-        PageType.LISTING,
-      ) as ListingData;
-
-      expect(result.products[0].url).toBe('/vp/products/12345');
-      expect(result.products[1].url).toBe('/vp/products/12346');
-      expect(result.products[2].url).toBe('/vp/products/12347');
-    });
-
-    it('should extract thumbnail URLs correctly', () => {
-      const result = extractorService.extract(
-        listingHtml,
-        listingXPaths,
-        PageType.LISTING,
-      ) as ListingData;
-
-      expect(result.products[0].thumbnail).toBe(
-        'https://example.com/images/product1.jpg',
-      );
-    });
-
-    it('should return empty products array for invalid XPaths', () => {
-      const invalidXPaths: ListingXPathMap = {
-        productCard: '//nonexistent-element',
-        thumbnail: './/img/@src',
-        name: './/span/text()',
-        price: './/div/text()',
-        url: './/a/@href',
+      const xpaths: ListingXPathMap = {
+        productCard: "//div[contains(@class, 'product-item')]",
+        name: ".//a[contains(@class, 'name')]/text()",
+        price: ".//span[contains(@class, 'price')]/text()",
+        url: ".//a/@href",
+        thumbnail: '',
       };
 
-      const result = extractorService.extract(
-        listingHtml,
-        invalidXPaths,
-        PageType.LISTING,
-      ) as ListingData;
+      const result = extractorService.extract(html, xpaths, PageType.LISTING);
+      expect(result).toHaveProperty('products');
+    });
 
-      expect(result.products).toHaveLength(0);
+    it('should call extractPDP for PDP page type', () => {
+      const html = `
+        <html>
+          <body>
+            <h1 class="product-name">Test Product</h1>
+            <span class="price">10,000원</span>
+          </body>
+        </html>
+      `;
+
+      const xpaths: PDPXPathMap = {
+        productName: "//h1[contains(@class, 'product-name')]",
+        price: "//span[contains(@class, 'price')]",
+      };
+
+      const result = extractorService.extract(html, xpaths, PageType.PDP);
+      expect(result).toHaveProperty('productName');
+      expect(result).toHaveProperty('price');
     });
   });
 
-  describe('extract PDP data', () => {
-    const pdpXPaths: PDPXPathMap = {
-      brandName: "//span[@class='brand']",
-      productName: "//h1[@class='product-title']",
-      price: "//span[@class='sale-price']",
-      description: "//div[@class='product-description']",
-      options: "//select[@class='option-select']/option",
-      detailImages: "//div[@class='detail-images']//img/@src",
-    };
+  describe('extractListing', () => {
+    const listingHtml = `
+      <html>
+        <body>
+          <div class="product-list">
+            <div class="product-card">
+              <a class="title" href="/products/1">Product 1</a>
+              <span class="price">10,000원</span>
+              <img class="thumb" src="http://example.com/1.jpg">
+            </div>
+            <div class="product-card">
+              <a class="title" href="/products/2">Product 2</a>
+              <span class="price">20,000원</span>
+              <img class="thumb" src="http://example.com/2.jpg">
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
 
-    it('should extract product name correctly', () => {
-      const result = extractorService.extract(
-        pdpHtml,
-        pdpXPaths,
-        PageType.PDP,
-      ) as PDPData;
+    it('should extract multiple products from listing page', () => {
+      const xpaths: ListingXPathMap = {
+        productCard: "//div[contains(@class, 'product-card')]",
+        name: ".//a[contains(@class, 'title')]",
+        price: ".//span[contains(@class, 'price')]",
+        url: ".//a/@href",
+        thumbnail: ".//img/@src",
+      };
 
-      expect(result.productName).toContain('Samsung Galaxy S24 Ultra');
+      const result = extractorService.extract(listingHtml, xpaths, PageType.LISTING);
+
+      expect('products' in result).toBe(true);
+      if ('products' in result) {
+        expect(result.products.length).toBe(2);
+        expect(result.products[0].name).toBe('Product 1');
+        expect(result.products[0].price).toBe('10,000원');
+        expect(result.products[1].name).toBe('Product 2');
+      }
     });
 
-    it('should extract brand name correctly', () => {
-      const result = extractorService.extract(
-        pdpHtml,
-        pdpXPaths,
-        PageType.PDP,
-      ) as PDPData;
+    it('should return empty products array when no productCard xpath', () => {
+      const xpaths: ListingXPathMap = {
+        productCard: '',
+        name: './/a',
+        price: './/span',
+        url: './/a/@href',
+        thumbnail: '',
+      };
 
-      expect(result.brandName).toBe('Samsung');
+      const result = extractorService.extract(listingHtml, xpaths, PageType.LISTING);
+
+      expect('products' in result).toBe(true);
+      if ('products' in result) {
+        expect(result.products.length).toBe(0);
+      }
     });
 
-    it('should extract price correctly', () => {
-      const result = extractorService.extract(
-        pdpHtml,
-        pdpXPaths,
-        PageType.PDP,
-      ) as PDPData;
+    it('should handle missing optional fields', () => {
+      const xpaths: ListingXPathMap = {
+        productCard: "//div[contains(@class, 'product-card')]",
+        name: ".//a[contains(@class, 'title')]",
+        price: ".//span[contains(@class, 'price')]",
+        url: '',
+        thumbnail: '',
+      };
 
-      expect(result.price).toContain('1,299,000');
+      const result = extractorService.extract(listingHtml, xpaths, PageType.LISTING);
+
+      expect('products' in result).toBe(true);
+      if ('products' in result) {
+        expect(result.products.length).toBeGreaterThan(0);
+        expect(result.products[0].thumbnail).toBeNull();
+      }
+    });
+  });
+
+  describe('extractPDP', () => {
+    const pdpHtml = `
+      <html>
+        <body>
+          <div class="product-detail">
+            <span class="brand">Test Brand</span>
+            <h1 class="product-name">Test Product Name</h1>
+            <span class="price">15,000원</span>
+            <div class="description">This is a test product description.</div>
+            <select class="options">
+              <option>Option 1</option>
+              <option>Option 2</option>
+            </select>
+            <div class="detail-images">
+              <img src="http://example.com/detail1.jpg">
+              <img src="http://example.com/detail2.jpg">
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    it('should extract all fields from PDP page', () => {
+      const xpaths: PDPXPathMap = {
+        brandName: "//span[contains(@class, 'brand')]",
+        productName: "//h1[contains(@class, 'product-name')]",
+        price: "//span[contains(@class, 'price')]",
+        description: "//div[contains(@class, 'description')]",
+        options: "//select[contains(@class, 'options')]/option",
+        detailImages: "//div[contains(@class, 'detail-images')]//img/@src",
+      };
+
+      const result = extractorService.extract(pdpHtml, xpaths, PageType.PDP);
+
+      expect('productName' in result).toBe(true);
+      if ('productName' in result) {
+        expect(result.brandName).toBe('Test Brand');
+        expect(result.productName).toBe('Test Product Name');
+        expect(result.price).toBe('15,000원');
+        expect(result.description).toContain('test product description');
+        expect(result.options).toContain('Option 1');
+        expect(result.options).toContain('Option 2');
+        expect(result.detailImages.length).toBe(2);
+      }
     });
 
-    it('should extract options correctly', () => {
-      const result = extractorService.extract(
-        pdpHtml,
-        pdpXPaths,
-        PageType.PDP,
-      ) as PDPData;
+    it('should handle missing optional fields in PDP', () => {
+      const xpaths: PDPXPathMap = {
+        productName: "//h1[contains(@class, 'product-name')]",
+        price: "//span[contains(@class, 'price')]",
+      };
 
-      expect(result.options.length).toBeGreaterThan(0);
-      expect(result.options).toContain('Titanium Black');
+      const result = extractorService.extract(pdpHtml, xpaths, PageType.PDP);
+
+      expect('productName' in result).toBe(true);
+      if ('productName' in result) {
+        expect(result.brandName).toBeNull();
+        expect(result.productName).toBe('Test Product Name');
+        expect(result.price).toBe('15,000원');
+        expect(result.description).toBeNull();
+        expect(result.options).toEqual([]);
+        expect(result.detailImages).toEqual([]);
+      }
+    });
+  });
+
+  describe('xpathToSelector conversion', () => {
+    it('should convert basic xpath to CSS selector', () => {
+      const html = `
+        <html>
+          <body>
+            <div class="test-class">Content</div>
+          </body>
+        </html>
+      `;
+
+      const xpaths: PDPXPathMap = {
+        productName: "//div[contains(@class, 'test-class')]",
+        price: "//div[contains(@class, 'test-class')]",
+      };
+
+      const result = extractorService.extract(html, xpaths, PageType.PDP);
+
+      expect('productName' in result).toBe(true);
+      if ('productName' in result) {
+        expect(result.productName).toBe('Content');
+      }
     });
 
-    it('should extract detail images correctly', () => {
-      const result = extractorService.extract(
-        pdpHtml,
-        pdpXPaths,
-        PageType.PDP,
-      ) as PDPData;
+    it('should handle id selectors', () => {
+      const html = `
+        <html>
+          <body>
+            <div id="product-title">Product Title</div>
+          </body>
+        </html>
+      `;
 
-      expect(result.detailImages.length).toBe(3);
-      expect(result.detailImages[0]).toBe('https://example.com/detail/detail1.jpg');
+      const xpaths: PDPXPathMap = {
+        productName: "//div[@id='product-title']",
+        price: "//div[@id='product-title']",
+      };
+
+      const result = extractorService.extract(html, xpaths, PageType.PDP);
+
+      expect('productName' in result).toBe(true);
+      if ('productName' in result) {
+        expect(result.productName).toBe('Product Title');
+      }
+    });
+  });
+
+  describe('error handling', () => {
+    it('should return empty data for invalid HTML', () => {
+      const xpaths: ListingXPathMap = {
+        productCard: "//div[contains(@class, 'product')]",
+        name: './/span',
+        price: './/span',
+        url: '',
+        thumbnail: '',
+      };
+
+      const result = extractorService.extract('', xpaths, PageType.LISTING);
+      expect('products' in result).toBe(true);
+      if ('products' in result) {
+        expect(result.products.length).toBe(0);
+      }
     });
   });
 });

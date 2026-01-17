@@ -35,16 +35,26 @@ export class ExtractorService {
     const $ = cheerio.load(html);
     const products: ListingData['products'] = [];
 
-    const productCards = $(this.xpathToSelector(xpaths.productCard));
-    this.logger.debug(`Found ${productCards.length} product containers`);
+    this.logger.debug(`XPaths received: ${JSON.stringify(xpaths)}`);
+
+    if (!xpaths || !xpaths.productCard) {
+      this.logger.warn('No productCard xpath provided');
+      return { products };
+    }
+
+    const containerSelector = this.xpathToSelector(xpaths.productCard);
+    this.logger.debug(`Container selector: "${containerSelector}"`);
+
+    const productCards = $(containerSelector);
+    this.logger.log(`Found ${productCards.length} product containers`);
 
     productCards.each((_: number, element: cheerio.Element) => {
       const $card = $(element);
 
-      const name = this.extractFromElement($, $card, xpaths.name);
-      const price = this.extractFromElement($, $card, xpaths.price);
-      const url = this.extractAttrFromElement($, $card, xpaths.url);
-      const thumbnail = this.extractAttrFromElement($, $card, xpaths.thumbnail);
+      const name = xpaths.name ? this.extractFromElement($, $card, xpaths.name) : null;
+      const price = xpaths.price ? this.extractFromElement($, $card, xpaths.price) : null;
+      const url = xpaths.url ? this.extractAttrFromElement($, $card, xpaths.url) : null;
+      const thumbnail = xpaths.thumbnail ? this.extractAttrFromElement($, $card, xpaths.thumbnail) : null;
 
       if (name || price || url) {
         products.push({
@@ -56,6 +66,7 @@ export class ExtractorService {
       }
     });
 
+    this.logger.log(`Extracted ${products.length} products`);
     return { products };
   }
 
@@ -81,6 +92,11 @@ export class ExtractorService {
   }
 
   private xpathToSelector(xpathStr: string): string {
+    if (!xpathStr || typeof xpathStr !== 'string') {
+      this.logger.warn(`Invalid xpath: ${xpathStr}`);
+      return '';
+    }
+
     const selector = xpathStr
       .replace(/^\/\//, '')
       .replace(/^\.\/\//, '')

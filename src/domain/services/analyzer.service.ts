@@ -100,12 +100,14 @@ export class AnalyzerService {
         : buildPDPXPathPrompt(html, feedback);
 
     const response = await this.aiClient.generate(prompt);
+    this.logger.log(`AI Raw Response: ${response.content}`);
 
     try {
       const xpaths = this.parseJsonResponse<XPathMap>(response.content);
-      this.logger.debug(`Generated XPaths: ${JSON.stringify(xpaths)}`);
+      this.logger.log(`Generated XPaths: ${JSON.stringify(xpaths, null, 2)}`);
       return xpaths;
     } catch (error) {
+      this.logger.error(`Failed to parse AI response: ${response.content.substring(0, 1000)}`);
       throw new AnalysisException(
         `Failed to parse XPath response: ${error instanceof Error ? error.message : String(error)}`,
       );

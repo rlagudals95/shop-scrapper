@@ -820,8 +820,7 @@ npm run test:watch
 npx commerce-crawler crawl https://www.coupang.com/vp/products/123456
 
 # 목록 페이지에서 상품 URL 추출
-npx commerce-crawler list https://www.coupang.com/np/search?q=laptop
-
+npx commerce-crawler list https://www.coupang.com/np/search?component=&q=%ED%97%A4%EC%96%B4%EB%B0%B4%EB%93%9C
 # 캐시 상태 확인
 npx commerce-crawler cache --list
 
