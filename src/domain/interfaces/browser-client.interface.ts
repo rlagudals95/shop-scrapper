@@ -122,6 +122,8 @@ export interface CoupangVendorItemResult {
   rawJson?: string;
   /** 에러 메시지 */
   error?: string;
+  /** 디버깅용 페이지 HTML */
+  pageHtml?: string;
 }
 
 export interface IBrowserClient {

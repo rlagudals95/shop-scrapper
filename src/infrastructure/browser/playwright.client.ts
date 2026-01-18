@@ -1015,6 +1015,42 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
         coupangPage.setDefaultTimeout(timeout);
 
         await coupangPage.goto(coupangUrl, { waitUntil: 'load', timeout });
+
+        // Akamai JS 챌린지 대기: 챌린지가 완료되면 페이지가 리로드됨
+        // 챌린지 스크립트가 location.reload(true)를 호출함
+        this.logger.log('Waiting for Akamai JS challenge and page reload...');
+
+        // 1차 대기: networkidle로 JS 실행 완료 대기
+        try {
+          await coupangPage.waitForLoadState('networkidle', { timeout: 30000 });
+        } catch {
+          this.logger.warn('First networkidle timeout');
+        }
+
+        // 2차 대기: 페이지 리로드 감지 (JS 챌린지 완료 시 발생)
+        try {
+          // 페이지가 리로드되면 새로운 navigation이 발생
+          await coupangPage.waitForNavigation({ timeout: 15000, waitUntil: 'networkidle' });
+          this.logger.log('Page reload detected, challenge may have passed');
+        } catch {
+          this.logger.warn('No navigation detected, checking page content...');
+        }
+
+        // 3차 대기: 검색 입력 필드가 나타나는지 확인 (챌린지 통과 시)
+        const searchInput = coupangPage.locator('#wa-search-form input.headerSearchKeyword');
+        try {
+          await searchInput.waitFor({ state: 'visible', timeout: 20000 });
+          this.logger.log('Search input visible - Akamai challenge passed!');
+        } catch {
+          this.logger.warn('Search input not visible - still blocked');
+          // 현재 페이지 내용 로깅
+          const currentHtml = await coupangPage.content();
+          this.logger.log(`Current page length: ${currentHtml.length}`);
+          if (currentHtml.length < 3000) {
+            this.logger.log(`Page content: ${currentHtml.substring(0, 1000)}`);
+          }
+        }
+
         await this.randomDelay(5000, 7000);  // Reference: Thread.sleep(5_000)
 
         // 5. 쿠팡에서 키워드 검색 (Reference: 검색 입력 대기 후 5초 추가 대기)
@@ -1027,7 +1063,12 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
 
           await coupangPage.locator(coupangSearchSelector).fill(keyword);
           await coupangPage.keyboard.press('Enter');
-          await coupangPage.waitForLoadState('domcontentloaded');
+          // Reference: waitForLoadState(LoadState.NETWORKIDLE) 후 검색
+          try {
+            await coupangPage.waitForLoadState('networkidle', { timeout: 30000 });
+          } catch {
+            this.logger.warn('Search networkidle timeout, continuing...');
+          }
           await this.randomDelay(3000, 5000);
 
           // 스크롤로 상품 로딩 유도
@@ -1259,7 +1300,11 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
 
   /**
    * 쿠팡 Vendor Item API 호출 (Reference: NextCoupangScraperService.kt)
-   * 세션이 워밍업된 상태에서 next-api를 직접 호출해 JSON 데이터 가져오기
+   *
+   * Reference 패턴 핵심:
+   * 1. 네이버 → 쿠팡 플로우로 세션 워밍업
+   * 2. 쿠팡 검색 완료 후 **같은 브라우저**에서 browser.newPage()로 API 호출
+   * 3. API 페이지에서 pre 태그 내 JSON 추출
    *
    * 중요: 프록시 미사용, 검색 플로우로 세션 워밍업 후 API 호출 (Reference 패턴)
    */
@@ -1313,11 +1358,22 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
           }
         }
 
-        // 4. 새 탭에서 쿠팡 열기
+        // 4. 새 탭에서 쿠팡 열기 (Reference: context.newPage())
         this.logger.log('Vendor Item Step 3: Opening Coupang in new tab...');
         const coupangPage = await context.newPage();
         coupangPage.setDefaultTimeout(timeout);
         await coupangPage.goto(coupangUrl, { waitUntil: 'load', timeout });
+
+        // Akamai JS 챌린지 대기: 챌린지가 완료되면 페이지가 리로드됨
+        // networkidle 상태까지 대기하여 JS 실행 완료 확인
+        this.logger.log('Waiting for Akamai JS challenge to complete...');
+        try {
+          await coupangPage.waitForLoadState('networkidle', { timeout: 30000 });
+        } catch {
+          this.logger.warn('networkidle timeout, trying to wait for navigation...');
+        }
+
+        // 추가 대기: JS 챌린지 후 리로드 대기
         await this.randomDelay(5000, 7000);
 
         // 5. 쿠팡에서 검색 (세션 워밍업) - Reference 패턴
@@ -1325,22 +1381,37 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
         const coupangSearchSelector = '#wa-search-form input.headerSearchKeyword';
         try {
           await coupangPage.waitForSelector(coupangSearchSelector, { timeout: 20000 });
-          await this.randomDelay(5000, 7000);
+          await this.randomDelay(5000, 7000);  // Reference: Thread.sleep(5_000)
           await coupangPage.locator(coupangSearchSelector).fill('갤럭시25 자급제');
           await coupangPage.keyboard.press('Enter');
-          await coupangPage.waitForLoadState('domcontentloaded');
+          // Reference: waitForLoadState(LoadState.NETWORKIDLE)
+          try {
+            await coupangPage.waitForLoadState('networkidle', { timeout: 30000 });
+          } catch {
+            this.logger.warn('Search networkidle timeout, continuing...');
+          }
           await this.randomDelay(3000, 5000);
-        } catch {
-          this.logger.warn('Search warmup failed, continuing...');
+          this.logger.log('Search warmup completed successfully');
+        } catch (searchError) {
+          this.logger.warn(`Search warmup failed: ${searchError}`);
         }
+
+        // Reference 패턴 핵심: 검색 완료 후 검색 페이지를 닫지 않고 유지한 상태에서
+        // **같은 context**에서 새 페이지를 열어 API 호출
+        // Note: Playwright Node.js에서 browser.newPage()는 새 context를 생성하므로 쿠키 공유 안됨
+        // 따라서 context.newPage()를 사용해야 세션이 유지됨
 
         // 6. Vendor Item API 호출 (Reference: NextCoupangScraperService.kt)
         const apiUrl = `https://www.coupang.com/next-api/products/vendor-items?productId=${productId}&vendorItemId=${vendorItemId}`;
-        this.logger.log(`Vendor Item Step 5: Fetching API: ${apiUrl}`);
+        this.logger.log(`Vendor Item Step 5: Fetching API in same context session: ${apiUrl}`);
 
-        // Reference 패턴: 새 페이지에서 API 직접 호출
+        // 같은 context에서 새 페이지 생성 (쿠키/세션 공유)
         const apiPage = await context.newPage();
         apiPage.setDefaultTimeout(timeout);
+
+        // Reference: setViewportSize(600, 600)
+        await apiPage.setViewportSize({ width: 600, height: 600 });
+
         await apiPage.goto(apiUrl, { waitUntil: 'load', timeout });
         await this.randomDelay(1000, 2000);
 
@@ -1348,25 +1419,36 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
         let rawJson: string | undefined;
         let data: Record<string, unknown> | null = null;
 
+        // 페이지 HTML 디버깅
+        const pageHtml = await apiPage.content();
+        this.logger.log(`[DEBUG] API page HTML length: ${pageHtml.length}`);
+        if (pageHtml.length < 3000) {
+          this.logger.log(`[DEBUG] API page HTML: ${pageHtml}`);
+        }
+
         try {
+          // Reference: productPage.locator("pre").textContent()
           rawJson = await apiPage.locator('pre').textContent() ?? undefined;
+          this.logger.log(`[DEBUG] pre tag content length: ${rawJson?.length ?? 0}`);
           if (rawJson) {
             data = JSON.parse(rawJson);
             this.logger.log('Vendor item data fetched successfully');
           }
-        } catch {
+        } catch (preError) {
+          this.logger.warn(`[DEBUG] pre tag extraction failed: ${preError}`);
           // pre 태그가 없으면 body 전체 텍스트 시도
           try {
             rawJson = await apiPage.locator('body').textContent() ?? undefined;
+            this.logger.log(`[DEBUG] body text length: ${rawJson?.length ?? 0}`);
             if (rawJson) {
               data = JSON.parse(rawJson);
             }
-          } catch {
-            this.logger.warn(`Failed to parse vendor item JSON`);
+          } catch (bodyError) {
+            this.logger.warn(`[DEBUG] body extraction failed: ${bodyError}`);
           }
         }
 
-        return { data, rawJson };
+        return { data, rawJson, pageHtml };
       } finally {
         await context.close().catch(() => {});
         await browser.close().catch(() => {});
