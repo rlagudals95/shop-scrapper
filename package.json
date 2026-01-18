@@ -32,8 +32,8 @@
     "test:coupang": "jest --testPathPattern=test/unit/coupang --verbose",
     "test:coupang:real": "jest --testPathPattern=real-ai-pipeline --verbose",
     "test:coupang:pipeline:mock": "jest --testPathPattern=coupang-pipeline-mock --verbose",
-    "test:coupang:fetch": "jest --testPathPattern=coupang-fetch --verbose --runInBand",
-    "test:local:html:ai:pipeline": "jest --testPathPattern=local-html-ai-pipeline --verbose"
+    "test:local:html:ai:pipeline": "jest --testPathPattern=local-html-ai-pipeline --verbose",
+    "test:naver-to-coupang": "jest --testPathPattern=naver-to-coupang-flow --verbose --runInBand"
   },
   "keywords": [
     "crawler",

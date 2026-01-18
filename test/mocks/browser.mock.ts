@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { FetchOptions, FetchResult, IBrowserClient, StealthLevel } from '../../src/domain/interfaces';
+import { FetchOptions, FetchResult, IBrowserClient } from '../../src/domain/interfaces';
 
 export class MockBrowserClient implements IBrowserClient {
   private urlToHtml: Map<string, string> = new Map();
@@ -31,9 +31,8 @@ export class MockBrowserClient implements IBrowserClient {
     const html = await this.getPageContent(url, options);
     return {
       html,
-      usedPlaywright: options?.forcePlaywright || false,
+      usedPlaywright: false,
       contentLength: html.length,
-      stealthLevel: options?.stealthLevel || StealthLevel.NONE,
       blocked: false,
     };
   }
