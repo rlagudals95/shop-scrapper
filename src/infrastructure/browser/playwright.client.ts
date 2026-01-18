@@ -14,7 +14,7 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Browser, BrowserContext, Cookie, Page, firefox } from 'playwright';
+import { Browser, BrowserContext, Cookie, Page, firefox, chromium } from 'playwright';
 
 /** Minimum HTML length to consider the response valid (not a blocked/empty page) */
 const MIN_VALID_HTML_LENGTH = 5000;
@@ -888,51 +888,51 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
   }
 
   /**
-   * 쿠팡 전용 새 브라우저 인스턴스 생성 (Reference 패턴: 매번 새로 생성)
-   * 기존 브라우저 재사용하면 쿠키/세션 오염으로 차단 가능성 높음
+   * 쿠팡 전용 새 브라우저 인스턴스 생성 (Stealth Chromium)
+   *
+   * 테스트 결과: Chromium + Stealth 설정이 Akamai 우회에 성공함
+   * - navigator.webdriver: undefined
+   * - window.chrome.runtime: true (진짜 Chrome처럼)
+   * - plugins, languages 마스킹
    */
   private async createFreshBrowserForCoupang(
     headless: boolean = false,
     proxy?: ProxyConfig,
   ): Promise<{ browser: Browser; context: BrowserContext }> {
-    this.logger.log(`Creating FRESH Firefox browser for Coupang (headless: ${headless})...`);
+    this.logger.log(`Creating STEALTH Chromium browser for Coupang (headless: ${headless})...`);
 
-    const firefoxOptions: any = {
+    const chromiumOptions: any = {
       headless,
-      firefoxUserPrefs: {
-        'dom.webdriver.enabled': false,
-        'privacy.resistFingerprinting': false,
-        'network.http.referer.spoofSource': true,
-        'general.useragent.override': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
-        'media.navigator.enabled': false,
-        'network.cookie.cookieBehavior': 0,
-        'browser.cache.disk.enable': true,
-        'browser.cache.memory.enable': true,
-        'browser.sessionstore.interval': 150000,
-        'toolkit.cosmeticAnimations.enabled': false,
-      },
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-infobars',
+        '--window-position=0,0',
+        '--ignore-certificate-errors',
+        '--ignore-certificate-errors-spki-list',
+      ],
     };
 
     if (proxy) {
-      // Playwright 프록시 형식: server는 http:// 프로토콜 필요
       const proxyServer = proxy.server.startsWith('http')
         ? proxy.server
         : `http://${proxy.server}`;
 
-      firefoxOptions.proxy = {
+      chromiumOptions.proxy = {
         server: proxyServer,
         username: proxy.username,
         password: proxy.password,
       };
-      firefoxOptions.ignoreHTTPSErrors = true;
       this.logger.log(`Proxy configured: ${proxyServer} (user: ${proxy.username?.substring(0, 30)}...)`);
     }
 
-    const browser = await firefox.launch(firefoxOptions);
+    const browser = await chromium.launch(chromiumOptions);
     const viewport = this.getRandomViewport();
 
     const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport,
       locale: 'ko-KR',
       timezoneId: 'Asia/Seoul',
@@ -948,11 +948,71 @@ export class PlaywrightClient implements IBrowserClient, OnModuleDestroy {
       ignoreHTTPSErrors: !!proxy,
     });
 
-    // WebDriver 감지 우회
+    // Stealth 스크립트 주입 (테스트에서 검증됨)
     await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-      Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR', 'ko', 'en-US', 'en'] });
+      // 1. navigator.webdriver 마스킹 (undefined로 설정)
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+
+      // 2. chrome.runtime 추가 (진짜 Chrome처럼)
+      // @ts-ignore
+      if (!window.chrome) window.chrome = {};
+      // @ts-ignore
+      if (!window.chrome.runtime) window.chrome.runtime = {};
+
+      // 3. 플러그인 배열 (빈 배열 회피)
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => {
+          const plugins = [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin' },
+          ];
+          // @ts-ignore
+          plugins.item = (i: number) => plugins[i];
+          // @ts-ignore
+          plugins.namedItem = (name: string) => plugins.find(p => p.name === name);
+          // @ts-ignore
+          plugins.refresh = () => {};
+          return plugins as unknown as PluginArray;
+        },
+      });
+
+      // 4. 언어 배열 확장
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['ko-KR', 'ko', 'en-US', 'en'],
+      });
+
+      // 5. Permissions API 조작
+      const originalQuery = Permissions.prototype.query;
+      Permissions.prototype.query = async function(desc: PermissionDescriptor) {
+        if (desc.name === 'notifications') {
+          return { state: 'prompt', onchange: null } as PermissionStatus;
+        }
+        return originalQuery.call(this, desc);
+      };
+
+      // 6. WebGL 정보 보호
+      const getParameterProxyHandler = {
+        apply(target: any, thisArg: any, args: any[]) {
+          const param = args[0];
+          if (param === 37445) return 'Intel Inc.';
+          if (param === 37446) return 'Intel Iris OpenGL Engine';
+          return Reflect.apply(target, thisArg, args);
+        },
+      };
+
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (gl) {
+          // @ts-ignore
+          const originalGetParameter = gl.getParameter.bind(gl);
+          // @ts-ignore
+          gl.getParameter = new Proxy(originalGetParameter, getParameterProxyHandler);
+        }
+      } catch {}
     });
 
     return { browser, context };
