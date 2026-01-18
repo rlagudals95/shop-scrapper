@@ -1,4 +1,4 @@
-import { IAiClient, AiResponse } from '../../src/domain/interfaces';
+import { AiResponse, IAiClient } from '../../src/domain/interfaces';
 
 export class MockGeminiClient implements IAiClient {
   private responses: Map<string, string> = new Map();

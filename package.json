@@ -28,7 +28,12 @@
     "test:infra:browser": "jest --testPathPattern=playwright.client",
     "test:infra:ai": "jest --testPathPattern=gemini.client",
     "test:integration": "jest --testPathPattern=test/integration",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:coupang": "jest --testPathPattern=test/unit/coupang --verbose",
+    "test:coupang:real": "jest --testPathPattern=real-ai-pipeline --verbose",
+    "test:coupang:pipeline:mock": "jest --testPathPattern=coupang-pipeline-mock --verbose",
+    "test:coupang:fetch": "jest --testPathPattern=coupang-fetch --verbose --runInBand",
+    "test:local:html:ai:pipeline": "jest --testPathPattern=local-html-ai-pipeline --verbose"
   },
   "keywords": [
     "crawler",
@@ -67,8 +72,8 @@
     "xpath": "^0.0.34"
   },
   "devDependencies": {
-    "@jest/globals": "^30.2.0",
-    "@jest/test-sequencer": "^30.2.0",
+    "@jest/globals": "^29.7.0",
+    "@jest/test-sequencer": "^29.7.0",
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@nestjs/testing": "^10.4.15",
@@ -109,6 +114,9 @@
     },
     "transformIgnorePatterns": [
       "node_modules/(?!(@exodus/bytes)/)"
+    ],
+    "setupFiles": [
+      "dotenv/config"
     ]
   }
 }

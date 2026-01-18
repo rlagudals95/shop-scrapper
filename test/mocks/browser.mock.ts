@@ -1,6 +1,6 @@
-import { IBrowserClient } from '../../src/domain/interfaces';
 import * as fs from 'fs';
 import * as path from 'path';
+import { FetchOptions, FetchResult, IBrowserClient, StealthLevel } from '../../src/domain/interfaces';
 
 export class MockBrowserClient implements IBrowserClient {
   private urlToHtml: Map<string, string> = new Map();
@@ -19,12 +19,23 @@ export class MockBrowserClient implements IBrowserClient {
     this.urlToHtml.clear();
   }
 
-  async getPageContent(url: string): Promise<string> {
+  async getPageContent(url: string, _options?: FetchOptions): Promise<string> {
     const html = this.urlToHtml.get(url);
     if (!html) {
       throw new Error(`No mock HTML configured for URL: ${url}`);
     }
     return html;
+  }
+
+  async getPageContentWithInfo(url: string, options?: FetchOptions): Promise<FetchResult> {
+    const html = await this.getPageContent(url, options);
+    return {
+      html,
+      usedPlaywright: options?.forcePlaywright || false,
+      contentLength: html.length,
+      stealthLevel: options?.stealthLevel || StealthLevel.NONE,
+      blocked: false,
+    };
   }
 
   async close(): Promise<void> {

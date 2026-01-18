@@ -10,11 +10,20 @@ const mockPage = {
   close: jest.fn(),
   waitForTimeout: jest.fn(),
   evaluate: jest.fn(),
+  mouse: {
+    move: jest.fn(),
+  },
+  viewportSize: jest.fn().mockReturnValue({ width: 1920, height: 1080 }),
+  locator: jest.fn().mockReturnValue({
+    all: jest.fn().mockResolvedValue([]),
+  }),
+  setExtraHTTPHeaders: jest.fn(),
 };
 
 const mockContext = {
   newPage: jest.fn(),
   close: jest.fn(),
+  addInitScript: jest.fn(),
 };
 
 const mockBrowser = {
@@ -132,37 +141,66 @@ describe('PlaywrightClient', () => {
       expect(mockLaunch).not.toHaveBeenCalled();
     });
 
-    it('should fallback to Playwright when HTTP response is too short', async () => {
+    it('should fallback to Playwright when HTTP response is too short (with autoFallback)', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
         text: () => Promise.resolve(shortHtml),
       });
 
-      const result = await playwrightClient.getPageContent('https://example.com');
+      const result = await playwrightClient.getPageContent('https://example.com', {
+        autoFallback: true,
+      });
 
       expect(result).toBe(validHtml); // Playwright returns validHtml
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(mockLaunch).toHaveBeenCalledTimes(1);
     });
 
-    it('should fallback to Playwright when HTTP fetch fails', async () => {
+    it('should throw error when HTTP response is too short without autoFallback', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(shortHtml),
+      });
+
+      await expect(
+        playwrightClient.getPageContent('https://example.com'),
+      ).rejects.toThrow('HTTP fetch failed or blocked');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockLaunch).not.toHaveBeenCalled();
+    });
+
+    it('should fallback to Playwright when HTTP fetch fails (with autoFallback)', async () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
-      const result = await playwrightClient.getPageContent('https://example.com');
+      const result = await playwrightClient.getPageContent('https://example.com', {
+        autoFallback: true,
+      });
 
       expect(result).toBe(validHtml);
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(mockLaunch).toHaveBeenCalledTimes(1);
     });
 
-    it('should fallback to Playwright when HTTP returns non-OK status', async () => {
+    it('should throw error when HTTP fetch fails without autoFallback', async () => {
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      await expect(
+        playwrightClient.getPageContent('https://example.com'),
+      ).rejects.toThrow('Network error');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockLaunch).not.toHaveBeenCalled();
+    });
+
+    it('should fallback to Playwright when HTTP returns non-OK status (with autoFallback)', async () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 403,
         statusText: 'Forbidden',
       });
 
-      const result = await playwrightClient.getPageContent('https://example.com');
+      const result = await playwrightClient.getPageContent('https://example.com', {
+        autoFallback: true,
+      });
 
       expect(result).toBe(validHtml);
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -199,39 +237,39 @@ describe('PlaywrightClient', () => {
     it('should return usedPlaywright: true when falling back to Playwright', async () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
-      const result = await playwrightClient.getPageContentWithInfo('https://example.com');
+      const result = await playwrightClient.getPageContentWithInfo('https://example.com', {
+        autoFallback: true,
+      });
 
       expect(result.usedPlaywright).toBe(true);
       expect(result.html).toBe(validHtml);
     });
   });
 
-  describe('getPageContent with Playwright', () => {
-    beforeEach(() => {
-      // Make HTTP fetch fail to test Playwright path
-      mockFetch.mockRejectedValue(new Error('Network error'));
-    });
-
+  describe('getPageContent with Playwright (forcePlaywright)', () => {
     it('should navigate to the provided URL', async () => {
       const testUrl = 'https://example.com/products';
 
-      await playwrightClient.getPageContent(testUrl);
+      await playwrightClient.getPageContent(testUrl, { forcePlaywright: true });
 
-      expect(mockPage.goto).toHaveBeenCalledWith(testUrl, {
-        waitUntil: 'networkidle',
-        timeout: 30000,
-      });
+      expect(mockPage.goto).toHaveBeenCalledWith(
+        testUrl,
+        expect.objectContaining({
+          waitUntil: 'networkidle',
+          timeout: 30000,
+        }),
+      );
     });
 
     it('should launch browser only once for multiple requests', async () => {
-      await playwrightClient.getPageContent('https://example.com/page1');
-      await playwrightClient.getPageContent('https://example.com/page2');
+      await playwrightClient.getPageContent('https://example.com/page1', { forcePlaywright: true });
+      await playwrightClient.getPageContent('https://example.com/page2', { forcePlaywright: true });
 
       expect(mockLaunch).toHaveBeenCalledTimes(1);
     });
 
     it('should close page after getting content', async () => {
-      await playwrightClient.getPageContent('https://example.com');
+      await playwrightClient.getPageContent('https://example.com', { forcePlaywright: true });
 
       expect(mockPage.close).toHaveBeenCalled();
     });
@@ -240,7 +278,7 @@ describe('PlaywrightClient', () => {
       mockPage.goto.mockRejectedValue(new Error('Navigation timeout'));
 
       await expect(
-        playwrightClient.getPageContent('https://example.com'),
+        playwrightClient.getPageContent('https://example.com', { forcePlaywright: true }),
       ).rejects.toThrow(CrawlException);
     });
 
@@ -248,7 +286,7 @@ describe('PlaywrightClient', () => {
       mockPage.goto.mockRejectedValue(new Error('Connection refused'));
 
       try {
-        await playwrightClient.getPageContent('https://blocked-site.com');
+        await playwrightClient.getPageContent('https://blocked-site.com', { forcePlaywright: true });
         fail('Should have thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(CrawlException);
@@ -261,13 +299,13 @@ describe('PlaywrightClient', () => {
       mockPage.content.mockResolvedValue(blockedHtml);
 
       // Should still return content even if blocked (let caller handle it)
-      const result = await playwrightClient.getPageContent('https://example.com');
+      const result = await playwrightClient.getPageContent('https://example.com', { forcePlaywright: true });
 
       expect(result).toBe(blockedHtml);
     });
 
     it('should simulate human-like behavior with scrolling', async () => {
-      await playwrightClient.getPageContent('https://example.com');
+      await playwrightClient.getPageContent('https://example.com', { forcePlaywright: true });
 
       expect(mockPage.evaluate).toHaveBeenCalled();
       expect(mockPage.waitForTimeout).toHaveBeenCalled();
@@ -277,7 +315,7 @@ describe('PlaywrightClient', () => {
       mockPage.content.mockRejectedValue(new Error('Content error'));
 
       try {
-        await playwrightClient.getPageContent('https://example.com');
+        await playwrightClient.getPageContent('https://example.com', { forcePlaywright: true });
       } catch {
         // Expected to throw
       }
@@ -287,14 +325,11 @@ describe('PlaywrightClient', () => {
   });
 
   describe('close', () => {
-    beforeEach(() => {
-      // Make HTTP fetch fail to test Playwright path
-      mockFetch.mockRejectedValue(new Error('Network error'));
-    });
-
     it('should close browser and context', async () => {
-      // First, ensure browser is launched
-      await playwrightClient.getPageContent('https://example.com');
+      // First, ensure browser is launched by using forcePlaywright
+      await playwrightClient.getPageContent('https://example.com', {
+        forcePlaywright: true,
+      });
 
       await playwrightClient.close();
 
@@ -308,7 +343,9 @@ describe('PlaywrightClient', () => {
     });
 
     it('should be safe to call multiple times', async () => {
-      await playwrightClient.getPageContent('https://example.com');
+      await playwrightClient.getPageContent('https://example.com', {
+        forcePlaywright: true,
+      });
 
       await playwrightClient.close();
       await playwrightClient.close();
@@ -319,12 +356,10 @@ describe('PlaywrightClient', () => {
   });
 
   describe('onModuleDestroy', () => {
-    beforeEach(() => {
-      mockFetch.mockRejectedValue(new Error('Network error'));
-    });
-
     it('should close browser on module destroy', async () => {
-      await playwrightClient.getPageContent('https://example.com');
+      await playwrightClient.getPageContent('https://example.com', {
+        forcePlaywright: true,
+      });
 
       await playwrightClient.onModuleDestroy();
 
