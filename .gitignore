@@ -27,8 +27,8 @@ test-results
 # OS
 .DS_Store
 
-# reference
-reference
+# data
+data
 
 # browser-profile
 browser-profile
