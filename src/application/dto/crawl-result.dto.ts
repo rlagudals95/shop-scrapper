@@ -38,4 +38,6 @@ export interface SearchCrawlResultDto {
   cached: boolean;
   /** 차단 여부 */
   blocked?: boolean;
+  /** 저장된 세션 ID */
+  sessionId?: number;
 }

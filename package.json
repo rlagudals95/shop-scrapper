@@ -34,7 +34,7 @@
     "test:coupang:pipeline:mock": "jest --testPathPattern=coupang-pipeline-mock --verbose",
     "test:local:html:ai:pipeline": "jest --testPathPattern=local-html-ai-pipeline --verbose",
     "test:coupang:proxy": "rm -rf data/browser-profile-coupang && PROXY_ENABLED=true jest --testPathPattern=coupang-browser-client --no-coverage --runInBand",
-    "test:coupang:proxy:legacy": "rm -rf data/browser-profile-proxy && PROXY_ENABLED=true jest --testPathPattern=residential-proxy-test --no-coverage --runInBand"
+    "test:coupang:e2e": "jest --testPathPattern=coupang-e2e-flow --verbose --runInBand"
   },
   "keywords": [
     "crawler",

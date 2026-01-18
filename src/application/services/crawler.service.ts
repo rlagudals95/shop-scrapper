@@ -8,9 +8,10 @@ import {
 } from '../dto';
 import { ExtractorService, ValidatorService, AnalyzerService } from '@/domain/services';
 import { IXPathRepository, IBrowserClient, ISiteBrowserClient, SiteType } from '@/domain/interfaces';
-import { PageType, XPathMap } from '@/domain/entities';
+import { PageType, XPathMap, ListingData } from '@/domain/entities';
 import { INJECTION_TOKENS, extractDomain, createLogger } from '@/common';
 import { CoupangBrowserClient } from '@/infrastructure/browser';
+import { CrawlResultRepository } from '@/infrastructure/database/repositories/crawl-result.repository';
 
 interface CrawlContext {
   url: string;
@@ -33,6 +34,7 @@ export class CrawlerService {
     private readonly validatorService: ValidatorService,
     private readonly analyzerService: AnalyzerService,
     private readonly configService: ConfigService,
+    private readonly crawlResultRepository: CrawlResultRepository,
   ) {}
 
   /**
@@ -134,14 +136,15 @@ export class CrawlerService {
   }
 
   /**
-   * 검색어 기반 Listing 페이지 크롤링
+   * 검색어 기반 Listing 크롤링 + DB 저장
    *
    * 플로우:
    * 1. 사이트별 브라우저 클라이언트 생성
    * 2. 검색어로 Listing 페이지 접근
    * 3. XPath 캐시 확인 또는 AI 분석
    * 4. 데이터 추출 및 검증
-   * 5. 실패 시 피드백과 함께 재시도 (최대 3회)
+   * 5. 성공 시 DB 저장 (crawl_sessions + listing_products)
+   * 6. 실패 시 피드백과 함께 재시도 (최대 3회)
    */
   async crawlByKeyword(request: SearchCrawlRequestDto): Promise<SearchCrawlResultDto> {
     const domain = this.getSiteDomain(request.site);
@@ -162,6 +165,14 @@ export class CrawlerService {
 
           if (!fetchResult.success) {
             this.logger.warn(`Page fetch failed: ${fetchResult.error}`);
+
+            // 실패 세션 저장
+            await this.crawlResultRepository.saveFailedSession(
+              request.site,
+              request.keyword,
+              fetchResult.error || 'Unknown error',
+            );
+
             return {
               success: false,
               keyword: request.keyword,
@@ -218,7 +229,7 @@ export class CrawlerService {
             html,
             xpaths,
             PageType.LISTING,
-          );
+          ) as ListingData;
 
           // 유효성 검증
           const validation = this.validatorService.validate(
@@ -230,6 +241,20 @@ export class CrawlerService {
             this.logger.log(
               `Crawl successful for "${request.keyword}" (score: ${validation.score})`,
             );
+
+            // DB 저장
+            const { session, products } = await this.crawlResultRepository.saveListingResult(
+              request.site,
+              request.keyword,
+              fetchResult.url,
+              html,
+              extractedData,
+            );
+
+            this.logger.log(
+              `Saved to DB: session #${session.id}, ${products.length} products`,
+            );
+
             return {
               success: true,
               keyword: request.keyword,
@@ -239,6 +264,7 @@ export class CrawlerService {
               rawHtml: html,
               retryCount,
               cached,
+              sessionId: session.id,
             };
           }
 
@@ -261,6 +287,12 @@ export class CrawlerService {
       }
 
       // 최대 재시도 횟수 초과
+      await this.crawlResultRepository.saveFailedSession(
+        request.site,
+        request.keyword,
+        `Maximum retry count (${this.MAX_RETRY_COUNT}) exceeded. Last feedback: ${feedback}`,
+      );
+
       return {
         success: false,
         keyword: request.keyword,
@@ -273,6 +305,13 @@ export class CrawlerService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`Crawl failed for "${request.keyword}": ${errorMessage}`);
+
+      // 실패 세션 저장
+      await this.crawlResultRepository.saveFailedSession(
+        request.site,
+        request.keyword,
+        errorMessage,
+      );
 
       return {
         success: false,
@@ -309,6 +348,20 @@ export class CrawlerService {
    */
   async crawlCoupangListing(keyword: string): Promise<SearchCrawlResultDto> {
     return this.crawlByKeyword({ keyword, site: 'coupang' });
+  }
+
+  /**
+   * 세션 조회
+   */
+  async getSession(sessionId: number) {
+    return this.crawlResultRepository.findSessionById(sessionId);
+  }
+
+  /**
+   * 최근 세션 목록 조회
+   */
+  async getRecentSessions(limit: number = 10) {
+    return this.crawlResultRepository.findRecentSessions(limit);
   }
 
   // ========== Private Methods ==========

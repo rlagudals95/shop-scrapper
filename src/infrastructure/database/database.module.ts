@@ -1,8 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { XPathCacheOrmEntity } from './entities/xpath-cache.orm-entity';
+import {
+  XPathCacheOrmEntity,
+  CrawlSessionOrmEntity,
+  ListingProductOrmEntity,
+} from './entities';
 import { XPathCacheRepository } from './repositories/xpath-cache.repository';
+import { CrawlResultRepository } from './repositories/crawl-result.repository';
 import { INJECTION_TOKENS } from '@/common';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -19,21 +24,34 @@ import * as fs from 'fs';
         return {
           type: 'better-sqlite3',
           database: dbPath,
-          entities: [XPathCacheOrmEntity],
+          entities: [
+            XPathCacheOrmEntity,
+            CrawlSessionOrmEntity,
+            ListingProductOrmEntity,
+          ],
           synchronize: true,
         };
       },
       inject: [ConfigService],
     }),
-    TypeOrmModule.forFeature([XPathCacheOrmEntity]),
+    TypeOrmModule.forFeature([
+      XPathCacheOrmEntity,
+      CrawlSessionOrmEntity,
+      ListingProductOrmEntity,
+    ]),
   ],
   providers: [
     XPathCacheRepository,
+    CrawlResultRepository,
     {
       provide: INJECTION_TOKENS.XPATH_REPOSITORY,
       useExisting: XPathCacheRepository,
     },
   ],
-  exports: [INJECTION_TOKENS.XPATH_REPOSITORY, XPathCacheRepository],
+  exports: [
+    INJECTION_TOKENS.XPATH_REPOSITORY,
+    XPathCacheRepository,
+    CrawlResultRepository,
+  ],
 })
 export class DatabaseModule {}
