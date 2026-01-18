@@ -1,17 +1,13 @@
-// Browser Client Interface & Types
+// Site-specific Browser Clients
+export { CoupangBrowserClient, BrowserClientConfig } from './coupang-browser.client';
+
+// Re-export domain interfaces for convenience
 export {
   ISiteBrowserClient,
-  PageResult,
-  BrowserClientConfig,
-  ProxyConfig,
+  SiteFetchResult,
   SiteType,
-} from './browser-client.interface';
-
-// Base Class
-export { BaseBrowserClient } from './base-browser.client';
-
-// Site-specific Clients
-export { CoupangBrowserClient } from './coupang-browser.client';
-
-// Factory
-export { BrowserClientFactory } from './browser-client.factory';
+  IBrowserClient,
+  FetchOptions,
+  FetchResult,
+  ProxyConfig,
+} from '@/domain/interfaces';

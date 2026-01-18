@@ -146,3 +146,63 @@ export interface IBrowserClient {
    */
   close(): Promise<void>;
 }
+
+/**
+ * 사이트별 브라우저 클라이언트 결과
+ */
+export interface SiteFetchResult {
+  /** 페이지 HTML */
+  html: string;
+  /** 최종 URL */
+  url: string;
+  /** 성공 여부 */
+  success: boolean;
+  /** 에러 메시지 */
+  error?: string;
+  /** 차단 여부 */
+  blocked?: boolean;
+}
+
+/**
+ * 사이트별 브라우저 클라이언트 인터페이스
+ *
+ * 사이트마다 봇 탐지 우회 전략이 다르므로 사이트별 구현 필요:
+ * - Coupang: Akamai Bot Manager 우회 (Residential Proxy + Stealth)
+ * - Naver: 기본 Stealth
+ * - Brand Store: 사이트별 상이
+ */
+export interface ISiteBrowserClient {
+  /**
+   * 클라이언트 초기화
+   */
+  initialize(): Promise<void>;
+
+  /**
+   * 검색 결과 페이지(Listing) HTML 가져오기
+   * @param keyword 검색어 (예: "헤어밴드", "갤럭시25 자급제")
+   * @returns 페이지 결과
+   */
+  getListingPage(keyword: string): Promise<SiteFetchResult>;
+
+  /**
+   * 상품 상세 페이지(PDP) HTML 가져오기
+   * @param url 상품 URL
+   * @returns 페이지 결과
+   */
+  getProductPage(url: string): Promise<SiteFetchResult>;
+
+  /**
+   * 브라우저 컨텍스트 정리
+   */
+  close(): Promise<void>;
+
+  /**
+   * 지원하는 사이트 도메인 목록
+   */
+  getSupportedDomains(): string[];
+}
+
+/**
+ * 사이트 타입
+ */
+export type SiteType = 'coupang' | 'naver' | 'naver-brand-store' | 'generic';

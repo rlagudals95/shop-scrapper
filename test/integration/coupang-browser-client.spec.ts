@@ -6,10 +6,7 @@
  * 실행: npm run test:coupang:proxy
  */
 
-import {
-  CoupangBrowserClient,
-  BrowserClientFactory,
-} from '../../src/infrastructure/browser';
+import { CoupangBrowserClient } from '../../src/infrastructure/browser';
 
 describe('CoupangBrowserClient', () => {
   let client: CoupangBrowserClient;
@@ -34,8 +31,8 @@ describe('CoupangBrowserClient', () => {
 
       console.log('\n=== CoupangBrowserClient Listing Test ===\n');
 
-      // Factory를 통한 생성
-      client = await BrowserClientFactory.createCoupangClient();
+      // Factory 메서드를 통한 생성
+      client = await CoupangBrowserClient.createWithProxy();
       expect(client.hasProxy()).toBe(true);
 
       // IP 확인
@@ -43,7 +40,7 @@ describe('CoupangBrowserClient', () => {
       console.log(`Current IP: ${ip}`);
 
       // 검색 결과 페이지 가져오기
-      const result = await client.getListingPage('갤럭시25 자급제');
+      const result = await client.getListingPage('헤어밴드');
 
       console.log(`\n결과:`);
       console.log(`  URL: ${result.url}`);
@@ -78,7 +75,7 @@ describe('CoupangBrowserClient', () => {
 
       console.log('\n=== CoupangBrowserClient PDP Test ===\n');
 
-      client = await BrowserClientFactory.createCoupangClient();
+      client = await CoupangBrowserClient.createWithProxy();
 
       // 테스트용 상품 URL (존재하는 상품)
       const productUrl = 'https://www.coupang.com/vp/products/8164588402';
@@ -98,20 +95,13 @@ describe('CoupangBrowserClient', () => {
     }, 300000);
   });
 
-  describe('Factory', () => {
-    it('should get correct site type from URL', () => {
-      expect(BrowserClientFactory.getSiteTypeFromUrl('https://www.coupang.com/np/search?q=test')).toBe('coupang');
-      expect(BrowserClientFactory.getSiteTypeFromUrl('https://coupang.com/vp/products/123')).toBe('coupang');
-      expect(BrowserClientFactory.getSiteTypeFromUrl('https://shopping.naver.com/search?query=test')).toBe('naver');
-      expect(BrowserClientFactory.getSiteTypeFromUrl('https://smartstore.naver.com/store')).toBe('naver-brand-store');
-      expect(BrowserClientFactory.getSiteTypeFromUrl('https://unknown-site.com')).toBe('generic');
-    });
+  describe('Interface', () => {
+    it('should return supported domains', () => {
+      const client = new CoupangBrowserClient();
+      const domains = client.getSupportedDomains();
 
-    it('should list implemented site types', () => {
-      const implemented = BrowserClientFactory.getImplementedSiteTypes();
-      expect(implemented).toContain('coupang');
-      expect(BrowserClientFactory.isImplemented('coupang')).toBe(true);
-      expect(BrowserClientFactory.isImplemented('naver')).toBe(false);
+      expect(domains).toContain('coupang.com');
+      expect(domains).toContain('www.coupang.com');
     });
   });
 });
