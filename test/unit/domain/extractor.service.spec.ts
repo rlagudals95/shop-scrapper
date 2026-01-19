@@ -264,4 +264,130 @@ describe('ExtractorService', () => {
       }
     });
   });
+
+  describe('evaluateExtractionQuality', () => {
+    it('should return 100% quality for all valid products with proper prices', () => {
+      const data = {
+        products: [
+          { name: 'Product 1', price: '10,000원', url: '/p/1', thumbnail: null },
+          { name: 'Product 2', price: '20,000원', url: '/p/2', thumbnail: null },
+          { name: 'Product 3', price: '30,000원', url: '/p/3', thumbnail: null },
+          { name: 'Product 4', price: '40,000원', url: '/p/4', thumbnail: null },
+          { name: 'Product 5', price: '50,000원', url: '/p/5', thumbnail: null },
+        ],
+      };
+
+      const quality = extractorService.evaluateExtractionQuality(data);
+
+      expect(quality.totalProducts).toBe(5);
+      expect(quality.validProducts).toBe(5);
+      expect(quality.priceValidProducts).toBe(5);
+      expect(quality.qualityScore).toBe(100);
+    });
+
+    it('should detect discount rate as invalid price', () => {
+      const data = {
+        products: [
+          { name: 'Product 1', price: '29%', url: '/p/1', thumbnail: null },
+          { name: 'Product 2', price: '44 %', url: '/p/2', thumbnail: null },
+          { name: 'Product 3', price: '10%', url: '/p/3', thumbnail: null },
+        ],
+      };
+
+      const quality = extractorService.evaluateExtractionQuality(data);
+
+      expect(quality.totalProducts).toBe(3);
+      expect(quality.validProducts).toBe(3); // name + url 있음
+      expect(quality.priceValidProducts).toBe(0); // 할인율은 유효 가격 아님
+    });
+
+    it('should accept various valid price formats', () => {
+      const data = {
+        products: [
+          { name: 'Product 1', price: '10,630원', url: '/p/1', thumbnail: null },
+          { name: 'Product 2', price: '5,100원', url: '/p/2', thumbnail: null },
+          { name: 'Product 3', price: '21,000', url: '/p/3', thumbnail: null },
+          { name: 'Product 4', price: '1000원', url: '/p/4', thumbnail: null },
+          { name: 'Product 5', price: '999', url: '/p/5', thumbnail: null },
+        ],
+      };
+
+      const quality = extractorService.evaluateExtractionQuality(data);
+
+      expect(quality.priceValidProducts).toBe(5);
+    });
+
+    it('should count products with missing name as invalid', () => {
+      const data = {
+        products: [
+          { name: '', price: '10,000원', url: '/p/1', thumbnail: null },
+          { name: '  ', price: '20,000원', url: '/p/2', thumbnail: null },
+          { name: 'Valid Product', price: '30,000원', url: '/p/3', thumbnail: null },
+        ],
+      };
+
+      const quality = extractorService.evaluateExtractionQuality(data);
+
+      expect(quality.totalProducts).toBe(3);
+      expect(quality.validProducts).toBe(1); // name + (price or url) 있는 것만
+      expect(quality.qualityScore).toBe(33);
+    });
+
+    it('should return 0 quality for empty products', () => {
+      const data = { products: [] };
+
+      const quality = extractorService.evaluateExtractionQuality(data);
+
+      expect(quality.totalProducts).toBe(0);
+      expect(quality.validProducts).toBe(0);
+      expect(quality.priceValidProducts).toBe(0);
+      expect(quality.qualityScore).toBe(0);
+    });
+  });
+
+  describe('isQualityAcceptable', () => {
+    it('should accept quality with 80%+ valid and 50%+ price valid', () => {
+      const quality = {
+        totalProducts: 10,
+        validProducts: 8,
+        priceValidProducts: 5,
+        qualityScore: 80,
+      };
+
+      expect(extractorService.isQualityAcceptable(quality)).toBe(true);
+    });
+
+    it('should reject quality with less than 5 products', () => {
+      const quality = {
+        totalProducts: 4,
+        validProducts: 4,
+        priceValidProducts: 4,
+        qualityScore: 100,
+      };
+
+      expect(extractorService.isQualityAcceptable(quality)).toBe(false);
+    });
+
+    it('should reject quality with less than 80% valid', () => {
+      const quality = {
+        totalProducts: 10,
+        validProducts: 7,
+        priceValidProducts: 7,
+        qualityScore: 70,
+      };
+
+      expect(extractorService.isQualityAcceptable(quality)).toBe(false);
+    });
+
+    it('should reject quality with less than 50% price valid', () => {
+      const quality = {
+        totalProducts: 10,
+        validProducts: 10,
+        priceValidProducts: 4, // 40% - below 50%
+        qualityScore: 100,
+      };
+
+      expect(extractorService.isQualityAcceptable(quality)).toBe(false);
+    });
+  });
 });

@@ -89,7 +89,9 @@ export class CrawlerService {
         await this.xpathRepository.upsert(context.domain, pageType, xpaths);
       }
 
-      const extractedData = this.extractorService.extract(html, xpaths, pageType);
+      // URL에서 origin 추출하여 상대 URL 정규화에 사용
+      const baseUrl = this.extractBaseUrl(request.url);
+      const extractedData = this.extractorService.extract(html, xpaths, pageType, { baseUrl });
       const validation = this.validatorService.validate(extractedData, pageType);
 
       if (validation.isValid) {
@@ -141,10 +143,10 @@ export class CrawlerService {
    * 플로우:
    * 1. 사이트별 브라우저 클라이언트 생성
    * 2. 검색어로 Listing 페이지 접근
-   * 3. XPath 캐시 확인 또는 AI 분석
-   * 4. 데이터 추출 및 검증
-   * 5. 성공 시 DB 저장 (crawl_sessions + listing_products)
-   * 6. 실패 시 피드백과 함께 재시도 (최대 3회)
+   * 3. XPath 캐시 확인 → 추출 → **품질 검증**
+   * 4. 캐시 검증 실패 시 → **캐시 무효화** + 피드백 생성
+   * 5. LLM으로 새 XPath 생성 (최대 2회 재시도)
+   * 6. 성공 시 → **캐시 저장** + DB 저장
    */
   async crawlByKeyword(request: SearchCrawlRequestDto): Promise<SearchCrawlResultDto> {
     const domain = this.getSiteDomain(request.site);
@@ -158,89 +160,126 @@ export class CrawlerService {
       // 사이트별 클라이언트 생성
       siteClient = await this.createSiteClient(request.site);
 
-      while (retryCount < this.MAX_RETRY_COUNT) {
-        try {
-          // HTML 가져오기
-          const fetchResult = await siteClient.getListingPage(request.keyword);
+      // HTML 가져오기 (루프 밖에서 한 번만)
+      const fetchResult = await siteClient.getListingPage(request.keyword);
 
-          if (!fetchResult.success) {
-            this.logger.warn(`Page fetch failed: ${fetchResult.error}`);
+      if (!fetchResult.success) {
+        this.logger.warn(`Page fetch failed: ${fetchResult.error}`);
 
-            // 실패 세션 저장
-            await this.crawlResultRepository.saveFailedSession(
+        // 실패 세션 저장
+        await this.crawlResultRepository.saveFailedSession(
+          request.site,
+          request.keyword,
+          fetchResult.error || 'Unknown error',
+        );
+
+        return {
+          success: false,
+          keyword: request.keyword,
+          site: request.site,
+          url: fetchResult.url,
+          error: fetchResult.error,
+          retryCount,
+          cached: false,
+          blocked: fetchResult.blocked,
+        };
+      }
+
+      const html = fetchResult.html;
+      const baseUrl = this.extractBaseUrl(fetchResult.url);
+      this.logger.log(`Fetched HTML: ${html.length} bytes from ${fetchResult.url}`);
+
+      // === 1. 캐시 확인 및 품질 검증 ===
+      if (!request.forceReanalyze) {
+        const cachedXPaths = await this.xpathRepository.findByDomain(
+          domain,
+          PageType.LISTING,
+        );
+
+        if (cachedXPaths) {
+          this.logger.log(`Testing cached XPaths for ${domain}`);
+
+          // 캐시된 XPath로 추출
+          const extractedData = this.extractorService.extract(
+            html,
+            cachedXPaths.xpaths,
+            PageType.LISTING,
+            { baseUrl },
+          ) as ListingData;
+
+          // 품질 검증
+          const quality = this.extractorService.evaluateExtractionQuality(extractedData);
+
+          if (this.extractorService.isQualityAcceptable(quality)) {
+            // 캐시 검증 성공 → 바로 반환
+            this.logger.log(
+              `Cache validation passed: ${quality.validProducts}/${quality.totalProducts} valid, ${quality.priceValidProducts} with valid price`,
+            );
+
+            // DB 저장
+            const { session } = await this.crawlResultRepository.saveListingResult(
               request.site,
               request.keyword,
-              fetchResult.error || 'Unknown error',
+              fetchResult.url,
+              html,
+              extractedData,
             );
 
             return {
-              success: false,
+              success: true,
               keyword: request.keyword,
               site: request.site,
               url: fetchResult.url,
-              error: fetchResult.error,
-              retryCount,
-              cached: false,
-              blocked: fetchResult.blocked,
+              data: extractedData,
+              rawHtml: html,
+              retryCount: 0,
+              cached: true,
+              sessionId: session.id,
             };
           }
 
-          const html = fetchResult.html;
-          this.logger.log(`Fetched HTML: ${html.length} bytes from ${fetchResult.url}`);
+          // 캐시 검증 실패 → 캐시 무효화 + 피드백 생성
+          this.logger.warn(
+            `Cache validation failed: ${quality.validProducts}/${quality.totalProducts} valid (${quality.qualityScore}%), ${quality.priceValidProducts} with valid price`,
+          );
+          await this.xpathRepository.invalidate(domain, PageType.LISTING);
+          feedback = this.validatorService.generateQualityFeedback(quality, cachedXPaths.xpaths);
+          this.logger.log(`Cache invalidated for ${domain}, will regenerate XPaths`);
+        }
+      }
 
-          // XPath 캐시 확인 또는 AI 분석
-          let xpaths: XPathMap;
-          let cached = false;
-
-          if (!request.forceReanalyze && !feedback) {
-            const cachedXPaths = await this.xpathRepository.findByDomain(
-              domain,
-              PageType.LISTING,
-            );
-
-            if (cachedXPaths) {
-              this.logger.log(`Using cached XPaths for ${domain}`);
-              xpaths = cachedXPaths.xpaths;
-              cached = true;
-            } else {
-              const analysis = await this.analyzerService.analyzeWithKnownType(
-                html,
-                PageType.LISTING,
-                feedback,
-              );
-              xpaths = analysis.xpaths;
-              await this.xpathRepository.upsert(domain, PageType.LISTING, xpaths);
-              this.logger.log(`New XPaths generated for ${domain}`);
-            }
-          } else {
-            // 강제 재분석 또는 피드백이 있는 경우
-            const analysis = await this.analyzerService.analyzeWithKnownType(
-              html,
-              PageType.LISTING,
-              feedback,
-            );
-            xpaths = analysis.xpaths;
-            await this.xpathRepository.upsert(domain, PageType.LISTING, xpaths);
-            this.logger.log(`Re-analyzed XPaths for ${domain} (feedback: ${!!feedback})`);
-          }
+      // === 2. LLM으로 XPath 생성 (재시도 루프) ===
+      while (retryCount < this.MAX_RETRY_COUNT) {
+        try {
+          // LLM 분석
+          const analysis = await this.analyzerService.analyzeWithKnownType(
+            html,
+            PageType.LISTING,
+            feedback,
+          );
+          const xpaths = analysis.xpaths;
+          this.logger.log(`Generated XPaths (attempt ${retryCount + 1}): ${JSON.stringify(xpaths)}`);
 
           // 데이터 추출
           const extractedData = this.extractorService.extract(
             html,
             xpaths,
             PageType.LISTING,
+            { baseUrl },
           ) as ListingData;
 
-          // 유효성 검증
-          const validation = this.validatorService.validate(
-            extractedData,
-            PageType.LISTING,
-          );
+          // 품질 검증
+          const quality = this.extractorService.evaluateExtractionQuality(extractedData);
 
-          if (validation.isValid) {
+          if (this.extractorService.isQualityAcceptable(quality)) {
+            // 성공 → 캐시 저장
+            await this.xpathRepository.upsert(domain, PageType.LISTING, xpaths);
             this.logger.log(
-              `Crawl successful for "${request.keyword}" (score: ${validation.score})`,
+              `XPath generation success (attempt ${retryCount + 1}): ${quality.validProducts}/${quality.totalProducts} valid`,
             );
+
+            // 기존 검증도 실행
+            const validation = this.validatorService.validate(extractedData, PageType.LISTING);
 
             // DB 저장
             const { session, products } = await this.crawlResultRepository.saveListingResult(
@@ -252,7 +291,7 @@ export class CrawlerService {
             );
 
             this.logger.log(
-              `Saved to DB: session #${session.id}, ${products.length} products`,
+              `Saved to DB: session #${session.id}, ${products.length} products (score: ${validation.score})`,
             );
 
             return {
@@ -263,15 +302,15 @@ export class CrawlerService {
               data: extractedData,
               rawHtml: html,
               retryCount,
-              cached,
+              cached: false,
               sessionId: session.id,
             };
           }
 
-          // 검증 실패 → 피드백 생성 후 재시도
-          feedback = this.validatorService.generateRecoveryFeedback(validation);
+          // 품질 미달 → 피드백 생성 후 재시도
+          feedback = this.validatorService.generateQualityFeedback(quality, xpaths);
           this.logger.warn(
-            `Validation failed (attempt ${retryCount + 1}/${this.MAX_RETRY_COUNT}): ${feedback}`,
+            `Quality check failed (attempt ${retryCount + 1}/${this.MAX_RETRY_COUNT}): ${quality.qualityScore}% valid, ${quality.priceValidProducts} valid prices`,
           );
           retryCount++;
         } catch (innerError) {
@@ -395,6 +434,19 @@ export class CrawlerService {
         return 'smartstore.naver.com';
       default:
         return 'unknown';
+    }
+  }
+
+  /**
+   * URL에서 origin (baseUrl) 추출
+   * 상대 URL을 절대 URL로 변환할 때 사용
+   */
+  private extractBaseUrl(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.origin;
+    } catch {
+      return '';
     }
   }
 }

@@ -1,84 +1,170 @@
-export const LISTING_XPATH_PROMPT = `당신은 웹 스크래핑 전문가입니다. 주어진 HTML에서 상품 목록을 추출하기 위한 XPath를 생성해야 합니다.
+export const LISTING_XPATH_PROMPT = `
+You are a senior web scraping engineer.
+Your job: given the provided HTML, produce robust CSS selectors to extract product listing data.
 
-## 작업
-아래 HTML을 분석하여 상품 정보를 추출할 수 있는 **실제 XPath**를 생성하세요.
-HTML의 실제 클래스명과 구조를 분석하여 정확한 XPath를 작성해야 합니다.
+### Hard rules (must follow)
+- Analyze ONLY the given HTML. Never invent class names, ids, attributes, or tags.
+- If a class/id/token is not present in the HTML, using it is invalid.
+- Prefer stable anchors: semantic attributes (itemprop, aria-label), data-* attributes, href patterns, or repeated DOM structure.
+- For hashed/dynamic classes (e.g., name_ab12C), use [class*="name_"] with the stable prefix only.
+- AVOID utility/styling classes like "fw-text-[20px]", "fw-font-bold", "text-lg", "mt-4" when possible.
+- Prefer semantic class names that describe WHAT the element is (productName, price, title) over HOW it looks (bold, large, red).
+- CRITICAL: If no semantic class exists for a field, use the PARENT container class to narrow scope:
+  Example: If price text has no unique class, use "[class*='priceArea'] div" instead of inventing classes.
+  The code will extract text from the matched element.
+- NEVER invent or guess class names (like "priceValue", "productTitle") that don't exist in the HTML.
+  If you don't see it in the HTML, don't use it.
 
-## 추출할 필드
-- productCard: 개별 상품을 감싸는 컨테이너 요소 (반복되는 상품 카드)
-- thumbnail: 상품 이미지 URL (src 또는 data-src 속성)
-- name: 상품명 텍스트
-- price: 가격 텍스트
-- url: 상품 상세 페이지 링크 (href 속성)
+### Task
+1) Identify the repeating "product card" node that represents ONE product (li/div/article/etc.).
+2) For each card, locate THE MOST SPECIFIC element for:
+   - thumbnail: The <img> element with product image (NOT banner/logo images)
+   - name: The element containing ONLY the product title (NOT the entire card or price area)
+   - price: The element containing ONLY the final sale price number (NOT original price, discount %, or shipping)
+   - url: The <a> element linking to product detail page
 
-## XPath 작성 규칙
-1. HTML에서 실제로 존재하는 클래스명과 태그를 사용하세요
-2. 동적 클래스(해시 포함)는 contains() 함수 사용: [contains(@class, 'product')]
-3. productCard는 절대 경로로, 나머지는 상대 경로(.//로 시작)로 작성
-4. 속성 추출시: /@src, /@href, /@data-src 등 사용
+### CSS Selector constraints
+- productCard MUST select ALL product cards (use specific class/attribute patterns).
+- All field selectors are RELATIVE to productCard (will be used with .find() in code).
+- For name/price: Select the SMALLEST element that contains just that text.
+- For url: Select the <a> tag directly (code will extract href attribute).
+- For thumbnail: Select the <img> tag directly (code will extract src/data-src attribute).
 
-## 응답 형식
-반드시 아래 JSON 형식으로만 응답하세요. 다른 설명 없이 JSON만 출력:
+### URL extraction - IMPORTANT
+- If productCard itself IS the <a> element (e.g., <a class="product-item" href="...">), use "self/@href" as the selector
+- If productCard CONTAINS an <a> element, use a normal CSS selector like "a" or "a[class*='link']"
+- Example: productCard="a[class*='product']" → url selector should be "self/@href"
+- Example: productCard="li[class*='product']" → url selector should be "a" or "a[class*='link']"
 
-\`\`\`json
+### Thumbnail extraction - IMPORTANT
+- The code will automatically try: src, data-src, data-lazy-src, srcset (in that order)
+- Just select the <img> element; attribute fallback is handled automatically
+- If productCard itself IS the <img> element, use "self/@src" as the selector
+
+### CRITICAL - productCard selector specificity
+- productCard should select ONLY actual product items, NOT navigation, header, footer, or sidebar elements
+- Look for elements with class patterns containing: *product*, *item*, *card*, *goods*
+- The selector MUST include class or attribute qualifiers
+- NEVER use generic selectors like "li", "div", "a", "ul > li" without class/attribute qualifiers
+- Good examples: "li[class*='product']", "div[class*='item']", "article[class*='card']"
+- Bad examples: "li", "div", "ul > li", "a" (too generic, will match unwanted elements)
+- A valid productCard selector should match roughly 10-100 elements (typical product listing count)
+
+### CRITICAL - Field selector specificity
+- name selector should match an element like: <span class="product-name">Product Title</span>
+  NOT a parent div that contains name + price + other info.
+- price selector should match an element like: <strong class="price">10,630원</strong>
+  NOT a parent that contains original price, discount, shipping info.
+
+### CRITICAL - Multiple selector patterns
+- A page may have MULTIPLE product types with DIFFERENT HTML structures (e.g., regular products vs widget/recommended products).
+- Use the "selectors" array to provide MULTIPLE selectors that cover ALL variants.
+- Example: If some products use [class*='priceValue'] and others use [class*='salePrice'], include BOTH:
+  "selectors": ["[class*='priceValue']", "[class*='salePrice']"]
+- The code will try each selector in order and use the first match.
+- This is especially important for price fields which often vary between product types on the same page.
+
+### CRITICAL - Selector robustness (VERY IMPORTANT)
+- AVOID direct child selectors (>) in field selectors. Use descendant selectors (space) instead.
+  BAD: "a > div[class*='productName']" - breaks if HTML structure changes
+  GOOD: "div[class*='productName']" - works regardless of nesting depth
+- Field selectors should target the FINAL element by its unique class/attribute, not the DOM path to it.
+- If the element has a distinguishing class like [class*='productName'] or [class*='priceValue'], use ONLY that.
+- The DOM path (a > figure > img) is fragile; class-based selection ([class*='productImage'] img) is robust.
+- Examples of GOOD selectors:
+  - name: "[class*='productName']" or "div[class*='title']"
+  - price: "[class*='price']" or "span[class*='salePrice']"
+  - thumbnail: "[class*='productImage'] img" or "img[class*='thumbnail']"
+- Examples of BAD selectors (too path-dependent):
+  - name: "a > div > div[class*='productName']"
+  - price: "div > div > span[class*='price']"
+  - thumbnail: "a > figure > img"
+
+### Output format (JSON only, no extra text)
+Return EXACTLY this JSON schema:
 {
-  "productCard": "실제_xpath_여기에",
-  "thumbnail": "실제_xpath_여기에",
-  "name": "실제_xpath_여기에",
-  "price": "실제_xpath_여기에",
-  "url": "실제_xpath_여기에"
+  "productCard": "<css selector for all product cards>",
+  "fields": {
+    "thumbnail": {
+      "selectors": ["<specific img selector>"],
+      "attribute": "src",
+      "fallbackAttributes": ["data-src", "srcset"],
+      "confidence": 0.0
+    },
+    "name": {
+      "selectors": ["<most specific selector for name text only>"],
+      "attribute": null,
+      "confidence": 0.0
+    },
+    "price": {
+      "selectors": ["<most specific selector for price number only>"],
+      "attribute": null,
+      "confidence": 0.0
+    },
+    "url": {
+      "selectors": ["<a tag selector>"],
+      "attribute": "href",
+      "confidence": 0.0
+    }
+  }
 }
-\`\`\`
+
+If a field is truly not present, set its selectors to [] and confidence to 0.0.
+Set confidence roughly: 0.9 (very sure), 0.6 (likely), 0.3 (weak).
 
 {feedback}
 
-## 분석할 HTML
-{html}`;
+### HTML
+{html}
+`;
 
-export const PDP_XPATH_PROMPT = `당신은 웹 스크래핑 전문가입니다. 주어진 상품 상세 페이지(PDP) HTML에서 상품 정보를 추출하기 위한 XPath를 생성해야 합니다.
+export const PDP_XPATH_PROMPT = `
+You are a senior web scraping engineer.
+Given a product detail page (PDP) HTML, produce robust XPaths for key product info.
 
-## 작업
-아래 HTML을 분석하여 상품 상세 정보를 추출할 수 있는 **실제 XPath**를 생성하세요.
-HTML의 실제 클래스명, ID, 구조를 분석하여 정확한 XPath를 작성해야 합니다.
+### Hard rules
+- Use ONLY tokens that exist in the provided HTML (classes/ids/attributes/tags).
+- Do NOT guess. If not found, return empty candidates.
+- For dynamic/hashed classes, use contains(@class, 'stable_prefix').
 
-## 추출할 필드
-- productName: 상품명 (필수) - 페이지에서 가장 눈에 띄는 상품 제목
-- price: 가격 (필수) - 할인가 또는 판매가
-- brandName: 브랜드명 (선택) - 없으면 빈 문자열 ""
-- description: 상품 설명 (선택) - 없으면 빈 문자열 ""
-- options: 옵션 선택 요소들 (선택) - 색상, 사이즈 등
-- detailImages: 상세 이미지들의 src 속성 (선택)
+### Extract fields
+Required:
+- productName
+- price (final sale price if multiple)
 
-## XPath 작성 규칙
-1. HTML에서 **실제로 존재하는** 클래스명, ID, 태그를 사용하세요
-2. 동적 클래스(해시 포함)는 contains() 사용: [contains(@class, 'price')]
-3. 텍스트 추출: 태그 자체를 선택하면 텍스트 추출됨 (text() 불필요)
-4. 속성 추출: /@src, /@href 등
-5. 찾을 수 없는 필드는 빈 문자열 "" 반환
+Optional:
+- brandName
+- description (prefer main description area; avoid shipping/returns)
+- options (the option container(s), not a single option)
+- detailImages (all detail image src/data-src/srcset)
 
-## 중요
-- 예제 XPath를 복사하지 말고 HTML을 실제로 분석하세요
-- 클래스명이 해시를 포함하면 (예: price_abc123) contains() 사용
-- JSON 형식 외에 다른 텍스트를 출력하지 마세요
+### XPath constraints
+- Use absolute XPath only if necessary; otherwise relative to a clear container is fine.
+- Prefer selecting the most specific element that contains the value (not the entire page section).
+- Attributes must end with /@src /@data-src /@srcset etc.
+- No text().
 
-## 응답 형식
-반드시 아래 JSON 형식으로만 응답하세요:
-
-\`\`\`json
+### Output format (JSON only)
 {
-  "productName": "실제_xpath_여기에",
-  "price": "실제_xpath_여기에",
-  "brandName": "실제_xpath_또는_빈문자열",
-  "description": "실제_xpath_또는_빈문자열",
-  "options": "실제_xpath_또는_빈문자열",
-  "detailImages": "실제_xpath_또는_빈문자열"
+  "productName": { "xpaths": ["..."], "postprocess": "trim", "confidence": 0.0 },
+  "price": { "xpaths": ["..."], "postprocess": "extract_number", "confidence": 0.0 },
+  "brandName": { "xpaths": ["..."], "postprocess": "trim", "confidence": 0.0 },
+  "description": { "xpaths": ["..."], "postprocess": "trim_html_or_text", "confidence": 0.0 },
+  "options": { "xpaths": ["..."], "postprocess": "none", "confidence": 0.0 },
+  "detailImages": {
+    "xpaths": [".../@src", ".../@data-src", ".../@srcset"],
+    "postprocess": "collect_urls",
+    "confidence": 0.0
+  }
 }
-\`\`\`
+
+If not present, use xpaths: [] and confidence: 0.0.
 
 {feedback}
 
-## 분석할 HTML
-{html}`;
+### HTML
+{html}
+`;
 
 export function buildListingXPathPrompt(html: string, feedback?: string): string {
   return LISTING_XPATH_PROMPT

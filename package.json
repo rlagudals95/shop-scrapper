@@ -30,11 +30,9 @@
     "test:integration": "jest --testPathPattern=test/integration",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:coupang": "jest --testPathPattern=test/unit/coupang --verbose",
-    "test:coupang:real": "jest --testPathPattern=real-ai-pipeline --verbose",
-    "test:coupang:pipeline:mock": "jest --testPathPattern=coupang-pipeline-mock --verbose",
-    "test:local:html:ai:pipeline": "jest --testPathPattern=local-html-ai-pipeline --verbose",
     "test:coupang:proxy": "rm -rf data/browser-profile-coupang && PROXY_ENABLED=true jest --testPathPattern=coupang-browser-client --no-coverage --runInBand",
-    "test:coupang:e2e": "jest --testPathPattern=coupang-e2e-flow --verbose --runInBand"
+    "test:coupang:e2e": "jest --testPathPattern=coupang-e2e-flow --verbose --runInBand",
+    "test:listing:xpath:extraction": "jest --testPathPattern=listing-xpath-extraction --verbose --runInBand"
   },
   "keywords": [
     "crawler",

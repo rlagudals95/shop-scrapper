@@ -103,7 +103,8 @@ export class AnalyzerService {
     this.logger.log(`AI Raw Response: ${response.content}`);
 
     try {
-      const xpaths = this.parseJsonResponse<XPathMap>(response.content);
+      const rawResponse = this.parseJsonResponse<Record<string, unknown>>(response.content);
+      const xpaths = this.normalizeXPathResponse(rawResponse, pageType);
       this.logger.log(`Generated XPaths: ${JSON.stringify(xpaths, null, 2)}`);
       return xpaths;
     } catch (error) {
@@ -112,6 +113,77 @@ export class AnalyzerService {
         `Failed to parse XPath response: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /**
+   * LLM 응답을 표준 XPathMap 형식으로 변환
+   * CSS 셀렉터 형식: { productCard, fields: { name: { selectors: [...], attribute: ... } } }
+   * XPath 형식: { productCard, fields: { name: { xpaths: [...] } } }
+   * 기존 형식: { productCard, name, price, url, thumbnail }
+   */
+  private normalizeXPathResponse(raw: Record<string, unknown>, pageType: PageType): XPathMap {
+    // 이미 기존 형식인 경우 (name이 string)
+    if (typeof raw.name === 'string' || typeof raw.productName === 'string') {
+      return raw as XPathMap;
+    }
+
+    // 새 형식 (fields 중첩 구조)
+    if (raw.fields && typeof raw.fields === 'object') {
+      const fields = raw.fields as Record<string, {
+        xpaths?: string[];
+        selectors?: string[];
+        attribute?: string | null;
+        fallbackAttributes?: string[];
+        confidence?: number;
+      }>;
+
+      // CSS 셀렉터 또는 XPath에서 값 추출 (여러 셀렉터를 ,로 연결)
+      const getSelector = (field?: {
+        xpaths?: string[];
+        selectors?: string[];
+        attribute?: string | null;
+      }): string | undefined => {
+        // CSS 셀렉터 형식 우선
+        if (field?.selectors && field.selectors.length > 0) {
+          // 여러 셀렉터를 CSS OR 연산자(,)로 연결
+          // 예: "[class*='priceValue'], [class*='salePrice']"
+          const combinedSelector = field.selectors.join(', ');
+          // 속성 추출이 필요한 경우 (href, src 등) 마커 추가
+          if (field.attribute) {
+            return `${combinedSelector}/@${field.attribute}`;
+          }
+          return combinedSelector;
+        }
+        // XPath 형식
+        const xpath = field?.xpaths?.[0];
+        return xpath && xpath.length > 0 ? xpath : undefined;
+      };
+
+      if (pageType === PageType.LISTING) {
+        return {
+          productCard: raw.productCard as string,
+          name: getSelector(fields.name),
+          price: getSelector(fields.price),
+          url: getSelector(fields.url),
+          thumbnail: getSelector(fields.thumbnail),
+        };
+      } else {
+        // PDP
+        const pdpFields = raw as Record<string, { xpaths?: string[]; selectors?: string[]; confidence?: number }>;
+        return {
+          productName: getSelector(pdpFields.productName),
+          price: getSelector(pdpFields.price),
+          brandName: getSelector(pdpFields.brandName),
+          description: getSelector(pdpFields.description),
+          options: getSelector(pdpFields.options),
+          detailImages: getSelector(pdpFields.detailImages),
+        };
+      }
+    }
+
+    // 알 수 없는 형식
+    this.logger.warn(`Unknown XPath response format: ${JSON.stringify(raw).substring(0, 500)}`);
+    return raw as XPathMap;
   }
 
   private parseJsonResponse<T>(response: string): T {
