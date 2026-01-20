@@ -23,14 +23,14 @@ import { ExtractorService } from '../../../src/domain/services/extractor.service
 import { ValidatorService } from '../../../src/domain/services/validator.service';
 import { HtmlFilterService } from '../../../src/domain/services/html-filter.service';
 import { GeminiClient } from '../../../src/infrastructure/ai/gemini.client';
-import { XPathCacheRepository } from '../../../src/infrastructure/database/repositories/xpath-cache.repository';
+import { SelectorCacheRepository } from '../../../src/infrastructure/database/repositories/selector-cache.repository';
 import {
-  XPathCacheOrmEntity,
+  SelectorCacheOrmEntity,
   CrawlSessionOrmEntity,
   ListingProductOrmEntity,
 } from '../../../src/infrastructure/database/entities';
 import { INJECTION_TOKENS } from '../../../src/common';
-import { PageType, isListingData, ListingXPathMap, ListingProduct } from '../../../src/domain/entities';
+import { PageType, isListingData, ListingSelectorMap, ListingProduct } from '../../../src/domain/entities';
 import configuration from '../../../src/infrastructure/config/configuration';
 
 // 테스트 fixture 경로 설정
@@ -99,7 +99,7 @@ describe('Listing XPath Extraction', () => {
   let extractorService: ExtractorService;
   let validatorService: ValidatorService;
   let htmlFilterService: HtmlFilterService;
-  let xpathRepository: XPathCacheRepository;
+  let selectorRepository: SelectorCacheRepository;
 
   const hasApiKey = !!process.env.GEMINI_API_KEY;
 
@@ -121,11 +121,11 @@ describe('Listing XPath Extraction', () => {
         TypeOrmModule.forRoot({
           type: 'better-sqlite3',
           database: ':memory:',
-          entities: [XPathCacheOrmEntity, CrawlSessionOrmEntity, ListingProductOrmEntity],
+          entities: [SelectorCacheOrmEntity, CrawlSessionOrmEntity, ListingProductOrmEntity],
           synchronize: true,
         }),
         TypeOrmModule.forFeature([
-          XPathCacheOrmEntity,
+          SelectorCacheOrmEntity,
           CrawlSessionOrmEntity,
           ListingProductOrmEntity,
         ]),
@@ -135,11 +135,11 @@ describe('Listing XPath Extraction', () => {
         ExtractorService,
         ValidatorService,
         HtmlFilterService,
-        XPathCacheRepository,
+        SelectorCacheRepository,
         GeminiClient,
         {
           provide: INJECTION_TOKENS.XPATH_REPOSITORY,
-          useExisting: XPathCacheRepository,
+          useExisting: SelectorCacheRepository,
         },
         {
           provide: INJECTION_TOKENS.AI_CLIENT,
@@ -152,7 +152,7 @@ describe('Listing XPath Extraction', () => {
     extractorService = module.get<ExtractorService>(ExtractorService);
     validatorService = module.get<ValidatorService>(ValidatorService);
     htmlFilterService = module.get<HtmlFilterService>(HtmlFilterService);
-    xpathRepository = module.get<XPathCacheRepository>(XPathCacheRepository);
+    selectorRepository = module.get<SelectorCacheRepository>(SelectorCacheRepository);
   }, 60000);
 
   afterAll(async () => {
@@ -163,7 +163,7 @@ describe('Listing XPath Extraction', () => {
 
   beforeEach(async () => {
     if (!hasApiKey) return;
-    await xpathRepository.clearAll();
+    await selectorRepository.clearAll();
   });
 
   describe('HTML 필터링 성능', () => {
@@ -223,10 +223,10 @@ describe('Listing XPath Extraction', () => {
       );
 
       console.log('3. 생성된 XPath:');
-      console.log(JSON.stringify(analysis.xpaths, null, 2));
+      console.log(JSON.stringify(analysis.selectors, null, 2));
 
       // 3. XPath 필수 필드 검증
-      const xpaths = analysis.xpaths as ListingXPathMap;
+      const xpaths = analysis.selectors as ListingSelectorMap;
       expect(xpaths.productCard).toBeDefined();
       expect(xpaths.name).toBeDefined();
       expect(xpaths.price).toBeDefined();
@@ -300,10 +300,10 @@ describe('Listing XPath Extraction', () => {
         filtered.html,
         PageType.LISTING,
       );
-      console.log(`   생성된 XPath: ${JSON.stringify(analysis.xpaths, null, 2)}`);
+      console.log(`   생성된 XPath: ${JSON.stringify(analysis.selectors, null, 2)}`);
 
       // 2. 추출 및 품질 검증 (캐시 저장 전)
-      const extracted = extractorService.extract(rawHtml, analysis.xpaths, PageType.LISTING, { baseUrl: coupangFixture.baseUrl });
+      const extracted = extractorService.extract(rawHtml, analysis.selectors, PageType.LISTING, { baseUrl: coupangFixture.baseUrl });
 
       expect(isListingData(extracted)).toBe(true);
       if (!isListingData(extracted)) return;
@@ -316,10 +316,10 @@ describe('Listing XPath Extraction', () => {
 
       // 3. 품질 기준 충족 시에만 캐시 저장
       if (quality.qualityScore >= 50) {
-        await xpathRepository.upsert(
+        await selectorRepository.upsert(
           coupangFixture.domain,
           PageType.LISTING,
-          analysis.xpaths,
+          analysis.selectors,
         );
         console.log(`3. 품질 기준 충족 → 캐시 저장 완료`);
       } else {
@@ -328,7 +328,7 @@ describe('Listing XPath Extraction', () => {
       }
 
       // 4. 캐시 조회
-      const cached = await xpathRepository.findByDomain(
+      const cached = await selectorRepository.findByDomain(
         coupangFixture.domain,
         PageType.LISTING,
       );
@@ -337,7 +337,7 @@ describe('Listing XPath Extraction', () => {
         console.log(`4. 캐시 조회 성공`);
 
         // 5. 캐시된 XPath로 다시 추출
-        const cachedExtracted = extractorService.extract(rawHtml, cached.xpaths, PageType.LISTING, { baseUrl: coupangFixture.baseUrl });
+        const cachedExtracted = extractorService.extract(rawHtml, cached.selectors, PageType.LISTING, { baseUrl: coupangFixture.baseUrl });
 
         if (isListingData(cachedExtracted)) {
           const cachedQuality = extractorService.evaluateExtractionQuality(cachedExtracted);
@@ -346,7 +346,7 @@ describe('Listing XPath Extraction', () => {
           console.log(`   - 품질: ${cachedQuality.qualityScore}%`);
 
           // JSON 파일로 저장
-          saveExtractionResult('coupang-xpath-cached', 'xpath', cachedExtracted.products, cached.xpaths);
+          saveExtractionResult('coupang-xpath-cached', 'xpath', cachedExtracted.products, cached.selectors);
 
           // 캐시된 XPath도 동일한 품질을 유지해야 함
           expect(cachedQuality.qualityScore).toBeGreaterThanOrEqual(50);
@@ -361,7 +361,7 @@ describe('Listing XPath Extraction', () => {
       // 품질 기준 충족 시 캐시가 저장되어 있어야 함
       if (quality.qualityScore >= 50) {
         expect(cached).not.toBeNull();
-        expect(cached!.xpaths.productCard).toBeDefined();
+        expect(cached!.selectors.productCard).toBeDefined();
       }
     }, 180000);
   });
@@ -530,9 +530,9 @@ describe('Listing XPath Extraction', () => {
         PageType.LISTING,
       );
 
-      console.log('생성된 XPath:', JSON.stringify(analysis.xpaths, null, 2));
+      console.log('생성된 XPath:', JSON.stringify(analysis.selectors, null, 2));
 
-      const xpaths = analysis.xpaths as ListingXPathMap;
+      const xpaths = analysis.selectors as ListingSelectorMap;
       expect(xpaths.productCard).toBeDefined();
 
       const extracted = extractorService.extract(rawHtml, xpaths, PageType.LISTING, { baseUrl: fixture.baseUrl });
@@ -552,15 +552,15 @@ describe('Listing XPath Extraction', () => {
 
         // 품질 기준 충족 시 캐시 저장
         if (quality.qualityScore >= 50) {
-          await xpathRepository.upsert(fixture.domain, PageType.LISTING, xpaths);
+          await selectorRepository.upsert(fixture.domain, PageType.LISTING, xpaths);
           console.log(`캐시 저장 완료: ${fixture.domain}`);
 
           // 캐시된 XPath로 다시 추출하여 검증
-          const cached = await xpathRepository.findByDomain(fixture.domain, PageType.LISTING);
+          const cached = await selectorRepository.findByDomain(fixture.domain, PageType.LISTING);
           if (cached) {
-            const cachedExtracted = extractorService.extract(rawHtml, cached.xpaths, PageType.LISTING, { baseUrl: fixture.baseUrl });
+            const cachedExtracted = extractorService.extract(rawHtml, cached.selectors, PageType.LISTING, { baseUrl: fixture.baseUrl });
             if (isListingData(cachedExtracted)) {
-              saveExtractionResult(`${fixture.name}-xpath-cached`, 'xpath', cachedExtracted.products, cached.xpaths);
+              saveExtractionResult(`${fixture.name}-xpath-cached`, 'xpath', cachedExtracted.products, cached.selectors);
               console.log(`캐시 검증 완료: ${cachedExtracted.products.length}개 상품`);
             }
           }

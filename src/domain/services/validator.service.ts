@@ -4,7 +4,7 @@ import {
   ExtractedData,
   ListingData,
   PDPData,
-  XPathMap,
+  SelectorMap,
   isListingData,
 } from '../entities';
 import { ValidationError } from '@/common';
@@ -249,11 +249,11 @@ export class ValidatorService {
 
   /**
    * 품질 기반 피드백 생성 (더 구체적인 피드백)
-   * - 추출 품질 지표와 현재 XPath를 기반으로 개선 방향 제시
+   * - 추출 품질 지표와 현재 셀렉터를 기반으로 개선 방향 제시
    */
   generateQualityFeedback(
     quality: ExtractionQuality,
-    xpaths: XPathMap,
+    selectors: SelectorMap,
   ): string {
     const issues: string[] = [];
 
@@ -262,9 +262,9 @@ export class ValidatorService {
       issues.push(
         `name 또는 url이 누락된 상품이 ${100 - quality.qualityScore}%입니다.`,
       );
-      if (xpaths.name) {
+      if (selectors.name) {
         issues.push(
-          `현재 name 셀렉터: "${xpaths.name}" - 더 정확한 셀렉터가 필요합니다.`,
+          `현재 name 셀렉터: "${selectors.name}" - 더 정확한 셀렉터가 필요합니다.`,
         );
       }
     }
@@ -274,8 +274,8 @@ export class ValidatorService {
       issues.push(
         `가격 추출이 실패했습니다. 현재 셀렉터가 할인율(%)을 추출하고 있을 수 있습니다.`,
       );
-      if (xpaths.price) {
-        issues.push(`현재 price 셀렉터: "${xpaths.price}"`);
+      if (selectors.price) {
+        issues.push(`현재 price 셀렉터: "${selectors.price}"`);
       }
       issues.push(
         `실제 판매 가격(예: "10,630원")을 포함하는 요소를 선택해주세요.`,
@@ -288,14 +288,14 @@ export class ValidatorService {
       issues.push(
         `추출된 상품이 ${quality.totalProducts}개로 너무 적습니다.`,
       );
-      if (xpaths.productCard) {
-        issues.push(`현재 productCard 셀렉터: "${xpaths.productCard}"`);
+      if (selectors.productCard) {
+        issues.push(`현재 productCard 셀렉터: "${selectors.productCard}"`);
       }
       issues.push(`더 많은 상품을 포함하는 상위 컨테이너를 선택해주세요.`);
     }
 
     return [
-      '## 이전 XPath 분석 결과가 품질 기준을 충족하지 못했습니다.',
+      '## 이전 셀렉터 분석 결과가 품질 기준을 충족하지 못했습니다.',
       '',
       '### 추출 결과:',
       `- 총 상품: ${quality.totalProducts}개`,

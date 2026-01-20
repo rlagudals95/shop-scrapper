@@ -25,15 +25,15 @@ import { INJECTION_TOKENS } from '../../../src/common';
 import {
   PageType,
   PDPData,
-  PDPXPathMap,
+  PDPSelectorMap,
 } from '../../../src/domain/entities';
 import { AnalyzerService } from '../../../src/domain/services/analyzer.service';
 import { ExtractorService } from '../../../src/domain/services/extractor.service';
 import { ValidatorService } from '../../../src/domain/services/validator.service';
 import { GeminiClient } from '../../../src/infrastructure/ai/gemini.client';
 import configuration from '../../../src/infrastructure/config/configuration';
-import { XPathCacheOrmEntity } from '../../../src/infrastructure/database/entities/xpath-cache.orm-entity';
-import { XPathCacheRepository } from '../../../src/infrastructure/database/repositories/xpath-cache.repository';
+import { SelectorCacheOrmEntity } from '../../../src/infrastructure/database/entities/selector-cache.orm-entity';
+import { SelectorCacheRepository } from '../../../src/infrastructure/database/repositories/selector-cache.repository';
 
 // Fixture paths
 const COUPANG_PDP_HTML = path.join(__dirname, '../../fixtures/coupang/html/pdp.html');
@@ -50,7 +50,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
   let analyzerService: AnalyzerService;
   let extractorService: ExtractorService;
   let validatorService: ValidatorService;
-  let xpathRepository: XPathCacheRepository;
+  let selectorRepository: SelectorCacheRepository;
   let html: string;
 
   const hasApiKey = !!process.env.GEMINI_API_KEY;
@@ -75,20 +75,20 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
         TypeOrmModule.forRoot({
           type: 'better-sqlite3',
           database: ':memory:',
-          entities: [XPathCacheOrmEntity],
+          entities: [SelectorCacheOrmEntity],
           synchronize: true,
         }),
-        TypeOrmModule.forFeature([XPathCacheOrmEntity]),
+        TypeOrmModule.forFeature([SelectorCacheOrmEntity]),
       ],
       providers: [
         AnalyzerService,
         ExtractorService,
         ValidatorService,
-        XPathCacheRepository,
+        SelectorCacheRepository,
         GeminiClient,
         {
           provide: INJECTION_TOKENS.XPATH_REPOSITORY,
-          useExisting: XPathCacheRepository,
+          useExisting: SelectorCacheRepository,
         },
         {
           provide: INJECTION_TOKENS.AI_CLIENT,
@@ -100,7 +100,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
     analyzerService = module.get<AnalyzerService>(AnalyzerService);
     extractorService = module.get<ExtractorService>(ExtractorService);
     validatorService = module.get<ValidatorService>(ValidatorService);
-    xpathRepository = module.get<XPathCacheRepository>(XPathCacheRepository);
+    selectorRepository = module.get<SelectorCacheRepository>(SelectorCacheRepository);
   }, 60000);
 
   afterAll(async () => {
@@ -142,14 +142,14 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       const result = await analyzerService.analyzeWithKnownType(html, PageType.PDP);
 
       console.log(`   생성된 XPath 필드:`);
-      console.log(`   - productName: ${result.xpaths.productName ? '✅' : '❌'}`);
-      console.log(`   - price: ${result.xpaths.price ? '✅' : '❌'}`);
-      console.log(`   - brandName: ${result.xpaths.brandName ? '✅' : '⚠️ (optional)'}`);
-      console.log(`   - description: ${result.xpaths.description ? '✅' : '⚠️ (optional)'}`);
+      console.log(`   - productName: ${result.selectors.productName ? '✅' : '❌'}`);
+      console.log(`   - price: ${result.selectors.price ? '✅' : '❌'}`);
+      console.log(`   - brandName: ${result.selectors.brandName ? '✅' : '⚠️ (optional)'}`);
+      console.log(`   - description: ${result.selectors.description ? '✅' : '⚠️ (optional)'}`);
 
       // 필수 필드 XPath 존재 확인
-      expect(result.xpaths.productName).toBeTruthy();
-      expect(result.xpaths.price).toBeTruthy();
+      expect(result.selectors.productName).toBeTruthy();
+      expect(result.selectors.price).toBeTruthy();
     }, 120000);
 
     it('생성된 XPath가 유효한 형식이어야 함', async () => {
@@ -158,7 +158,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       const result = await analyzerService.analyzeWithKnownType(html, PageType.PDP);
 
       // XPath 형식 검증 (// 또는 .// 로 시작)
-      const xpaths = result.xpaths as PDPXPathMap;
+      const xpaths = result.selectors as PDPSelectorMap;
 
       if (xpaths.productName) {
         expect(xpaths.productName).toMatch(/^(\/\/|\.\/\/)/);
@@ -185,7 +185,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       // 데이터 추출
       const data = extractorService.extract(
         html,
-        analysis.xpaths,
+        analysis.selectors,
         PageType.PDP,
       ) as PDPData;
 
@@ -206,7 +206,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       if (!hasApiKey) return;
 
       const analysis = await analyzerService.analyzeWithKnownType(html, PageType.PDP);
-      const data = extractorService.extract(html, analysis.xpaths, PageType.PDP) as PDPData;
+      const data = extractorService.extract(html, analysis.selectors, PageType.PDP) as PDPData;
 
       // 상품명 검증
       const productNameMatch =
@@ -240,7 +240,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       console.log('\n✅ [4] 유효성 검증 테스트');
 
       const analysis = await analyzerService.analyzeWithKnownType(html, PageType.PDP);
-      const data = extractorService.extract(html, analysis.xpaths, PageType.PDP) as PDPData;
+      const data = extractorService.extract(html, analysis.selectors, PageType.PDP) as PDPData;
       const validation = validatorService.validate(data, PageType.PDP);
 
       console.log(`   검증 결과: ${validation.isValid ? '✅ PASS' : '❌ FAIL'}`);
@@ -307,7 +307,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
 
     beforeEach(async () => {
       if (!hasApiKey) return;
-      await xpathRepository.clearAll();
+      await selectorRepository.clearAll();
     });
 
     it('XPath를 저장하고 조회할 수 있어야 함', async () => {
@@ -315,66 +315,66 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
 
       console.log('\n💾 [5] XPath 캐싱 테스트');
 
-      const xpaths: PDPXPathMap = {
+      const xpaths: PDPSelectorMap = {
         productName: "//h1[@class='product-title']",
         price: "//span[@class='price']",
         brandName: "//span[@class='brand']",
       };
 
       // 저장
-      await xpathRepository.upsert(testDomain, PageType.PDP, xpaths);
+      await selectorRepository.upsert(testDomain, PageType.PDP, xpaths);
       console.log(`   저장 완료: ${testDomain} (PDP)`);
 
       // 조회
-      const cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
+      const cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
 
       console.log(`   조회 결과: ${cached ? '✅ 캐시 히트' : '❌ 캐시 미스'}`);
 
       expect(cached).not.toBeNull();
-      expect(cached!.xpaths).toEqual(xpaths);
+      expect(cached!.selectors).toEqual(xpaths);
     });
 
     it('캐시 갱신이 정상 동작해야 함', async () => {
       if (!hasApiKey) return;
 
-      const oldXpaths: PDPXPathMap = {
+      const oldXpaths: PDPSelectorMap = {
         productName: "//h1[@class='old-title']",
         price: "//span[@class='old-price']",
       };
 
-      const newXpaths: PDPXPathMap = {
+      const newXpaths: PDPSelectorMap = {
         productName: "//h1[@class='new-title']",
         price: "//span[@class='new-price']",
       };
 
       // 첫 번째 저장
-      await xpathRepository.upsert(testDomain, PageType.PDP, oldXpaths);
+      await selectorRepository.upsert(testDomain, PageType.PDP, oldXpaths);
 
       // 갱신
-      await xpathRepository.upsert(testDomain, PageType.PDP, newXpaths);
+      await selectorRepository.upsert(testDomain, PageType.PDP, newXpaths);
 
       // 확인
-      const cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
+      const cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
 
-      console.log(`   갱신 후 XPath: ${cached?.xpaths.productName}`);
+      console.log(`   갱신 후 XPath: ${cached?.selectors.productName}`);
 
-      expect(cached!.xpaths.productName).toBe(newXpaths.productName);
+      expect(cached!.selectors.productName).toBe(newXpaths.productName);
     });
 
     it('캐시 무효화가 정상 동작해야 함', async () => {
       if (!hasApiKey) return;
 
-      const xpaths: PDPXPathMap = {
+      const xpaths: PDPSelectorMap = {
         productName: "//h1",
         price: "//span",
       };
 
-      await xpathRepository.upsert(testDomain, PageType.PDP, xpaths);
+      await selectorRepository.upsert(testDomain, PageType.PDP, xpaths);
 
       // 무효화
-      await xpathRepository.invalidate(testDomain, PageType.PDP);
+      await selectorRepository.invalidate(testDomain, PageType.PDP);
 
-      const cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
+      const cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
 
       console.log(`   무효화 후: ${cached ? '⚠️ 캐시 존재' : '✅ 캐시 삭제됨'}`);
 
@@ -388,15 +388,15 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       const analysis = await analyzerService.analyzeWithKnownType(html, PageType.PDP);
 
       // 캐시 저장
-      await xpathRepository.upsert(testDomain, PageType.PDP, analysis.xpaths);
+      await selectorRepository.upsert(testDomain, PageType.PDP, analysis.selectors);
 
       // 캐시 조회
-      const cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
+      const cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
 
       console.log(`   AI XPath 캐싱: ${cached ? '✅' : '❌'}`);
 
       expect(cached).not.toBeNull();
-      expect(cached!.xpaths.productName).toBe(analysis.xpaths.productName);
+      expect(cached!.selectors.productName).toBe(analysis.selectors.productName);
     }, 120000);
   });
 
@@ -409,7 +409,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
 
     beforeEach(async () => {
       if (!hasApiKey) return;
-      await xpathRepository.clearAll();
+      await selectorRepository.clearAll();
     });
 
     it('잘못된 XPath로 추출 실패 시 재분석해야 함', async () => {
@@ -418,17 +418,17 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       console.log('\n🔄 [6] 복구 루프 테스트');
 
       // 1단계: 잘못된 XPath 캐싱
-      const wrongXpaths: PDPXPathMap = {
+      const wrongXpaths: PDPSelectorMap = {
         productName: "//div[@class='non-existent-class']",
         price: "//span[@class='wrong-price']",
       };
 
-      await xpathRepository.upsert(testDomain, PageType.PDP, wrongXpaths);
+      await selectorRepository.upsert(testDomain, PageType.PDP, wrongXpaths);
       console.log(`   1단계: 잘못된 XPath 캐싱`);
 
       // 2단계: 캐시된 XPath로 추출 시도
-      let cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
-      let data = extractorService.extract(html, cached!.xpaths, PageType.PDP) as PDPData;
+      let cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
+      let data = extractorService.extract(html, cached!.selectors, PageType.PDP) as PDPData;
       let validation = validatorService.validate(data, PageType.PDP);
 
       console.log(`   2단계: 추출 시도 → ${validation.isValid ? '성공' : '❌ 실패 (예상)'}`);
@@ -436,14 +436,14 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
 
       // 3단계: 복구 - 캐시 무효화 및 AI 재분석
       console.log(`   3단계: 복구 시작 (캐시 무효화 + AI 재분석)`);
-      await xpathRepository.invalidate(testDomain, PageType.PDP);
+      await selectorRepository.invalidate(testDomain, PageType.PDP);
 
       const newAnalysis = await analyzerService.analyzeWithKnownType(html, PageType.PDP);
-      await xpathRepository.upsert(testDomain, PageType.PDP, newAnalysis.xpaths);
+      await selectorRepository.upsert(testDomain, PageType.PDP, newAnalysis.selectors);
 
       // 4단계: 새 XPath로 재추출
-      cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
-      data = extractorService.extract(html, cached!.xpaths, PageType.PDP) as PDPData;
+      cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
+      data = extractorService.extract(html, cached!.selectors, PageType.PDP) as PDPData;
       validation = validatorService.validate(data, PageType.PDP);
 
       console.log(`   4단계: 재추출 → ${validation.isValid ? '✅ 성공' : '❌ 실패'}`);
@@ -473,13 +473,13 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       );
 
       // 재분석 결과 검증
-      const data = extractorService.extract(html, result.xpaths, PageType.PDP) as PDPData;
+      const data = extractorService.extract(html, result.selectors, PageType.PDP) as PDPData;
       const validation = validatorService.validate(data, PageType.PDP);
 
       console.log(`   피드백 후 결과: ${validation.isValid ? '✅ 성공' : '❌ 실패'}`);
 
-      expect(result.xpaths.productName).toBeTruthy();
-      expect(result.xpaths.price).toBeTruthy();
+      expect(result.selectors.productName).toBeTruthy();
+      expect(result.selectors.price).toBeTruthy();
     }, 120000);
   });
 
@@ -495,10 +495,10 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       console.log('='.repeat(50));
 
       const testDomain = 'coupang-e2e.com';
-      await xpathRepository.clearAll();
+      await selectorRepository.clearAll();
 
       // Step 1: 캐시 확인 (미스 예상)
-      let cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
+      let cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
       console.log(`\n📌 Step 1: 캐시 확인 → ${cached ? '히트' : '미스'}`);
       expect(cached).toBeNull();
 
@@ -510,11 +510,11 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
 
       // Step 3: 캐시 저장
       console.log(`📌 Step 3: XPath 캐시 저장`);
-      await xpathRepository.upsert(testDomain, analysis.pageType, analysis.xpaths);
+      await selectorRepository.upsert(testDomain, analysis.pageType, analysis.selectors);
 
       // Step 4: 데이터 추출
       console.log(`📌 Step 4: 데이터 추출`);
-      const data = extractorService.extract(html, analysis.xpaths, analysis.pageType) as PDPData;
+      const data = extractorService.extract(html, analysis.selectors, analysis.pageType) as PDPData;
       console.log(`   → 상품명: ${data.productName}`);
       console.log(`   → 가격: ${data.price}`);
 
@@ -524,7 +524,7 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       console.log(`   → 결과: ${validation.isValid ? '✅ PASS' : '❌ FAIL'} (점수: ${validation.score})`);
 
       // Step 6: 캐시 재확인 (히트 예상)
-      cached = await xpathRepository.findByDomain(testDomain, PageType.PDP);
+      cached = await selectorRepository.findByDomain(testDomain, PageType.PDP);
       console.log(`📌 Step 6: 캐시 재확인 → ${cached ? '✅ 히트' : '미스'}`);
 
       console.log('\n' + '='.repeat(50));

@@ -8,9 +8,9 @@ import {
 } from 'typeorm';
 import { PageType } from '@/domain/entities';
 
-@Entity('xpath_cache')
+@Entity('selector_cache')
 @Index(['siteDomain', 'pageType'], { unique: true })
-export class XPathCacheOrmEntity {
+export class SelectorCacheOrmEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
@@ -21,7 +21,7 @@ export class XPathCacheOrmEntity {
   pageType: PageType;
 
   @Column({ type: 'text' })
-  xpathsJson: string;
+  selectorsJson: string;
 
   @CreateDateColumn()
   createdAt: Date;
@@ -29,3 +29,7 @@ export class XPathCacheOrmEntity {
   @UpdateDateColumn()
   updatedAt: Date;
 }
+
+// Backward compatibility alias
+/** @deprecated Use SelectorCacheOrmEntity instead */
+export const XPathCacheOrmEntity = SelectorCacheOrmEntity;

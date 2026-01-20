@@ -1,4 +1,4 @@
-export const LISTING_XPATH_PROMPT = `
+export const LISTING_SELECTOR_PROMPT = `
 You are a senior web scraping engineer.
 Your job: given the provided HTML, produce robust CSS selectors to extract product listing data.
 
@@ -118,14 +118,14 @@ Set confidence roughly: 0.9 (very sure), 0.6 (likely), 0.3 (weak).
 {html}
 `;
 
-export const PDP_XPATH_PROMPT = `
+export const PDP_SELECTOR_PROMPT = `
 You are a senior web scraping engineer.
-Given a product detail page (PDP) HTML, produce robust XPaths for key product info.
+Given a product detail page (PDP) HTML, produce robust CSS selectors for key product info.
 
 ### Hard rules
 - Use ONLY tokens that exist in the provided HTML (classes/ids/attributes/tags).
 - Do NOT guess. If not found, return empty candidates.
-- For dynamic/hashed classes, use contains(@class, 'stable_prefix').
+- For dynamic/hashed classes, use [class*='stable_prefix'].
 
 ### Extract fields
 Required:
@@ -138,27 +138,25 @@ Optional:
 - options (the option container(s), not a single option)
 - detailImages (all detail image src/data-src/srcset)
 
-### XPath constraints
-- Use absolute XPath only if necessary; otherwise relative to a clear container is fine.
-- Prefer selecting the most specific element that contains the value (not the entire page section).
-- Attributes must end with /@src /@data-src /@srcset etc.
-- No text().
+### CSS Selector constraints
+- Use the most specific element that contains the value (not the entire page section).
+- For attributes, use /@src /@data-src /@srcset markers at the end.
 
 ### Output format (JSON only)
 {
-  "productName": { "xpaths": ["..."], "postprocess": "trim", "confidence": 0.0 },
-  "price": { "xpaths": ["..."], "postprocess": "extract_number", "confidence": 0.0 },
-  "brandName": { "xpaths": ["..."], "postprocess": "trim", "confidence": 0.0 },
-  "description": { "xpaths": ["..."], "postprocess": "trim_html_or_text", "confidence": 0.0 },
-  "options": { "xpaths": ["..."], "postprocess": "none", "confidence": 0.0 },
+  "productName": { "selectors": ["..."], "postprocess": "trim", "confidence": 0.0 },
+  "price": { "selectors": ["..."], "postprocess": "extract_number", "confidence": 0.0 },
+  "brandName": { "selectors": ["..."], "postprocess": "trim", "confidence": 0.0 },
+  "description": { "selectors": ["..."], "postprocess": "trim_html_or_text", "confidence": 0.0 },
+  "options": { "selectors": ["..."], "postprocess": "none", "confidence": 0.0 },
   "detailImages": {
-    "xpaths": [".../@src", ".../@data-src", ".../@srcset"],
+    "selectors": [".../@src", ".../@data-src", ".../@srcset"],
     "postprocess": "collect_urls",
     "confidence": 0.0
   }
 }
 
-If not present, use xpaths: [] and confidence: 0.0.
+If not present, use selectors: [] and confidence: 0.0.
 
 {feedback}
 
@@ -166,14 +164,24 @@ If not present, use xpaths: [] and confidence: 0.0.
 {html}
 `;
 
-export function buildListingXPathPrompt(html: string, feedback?: string): string {
-  return LISTING_XPATH_PROMPT
+export function buildListingSelectorPrompt(html: string, feedback?: string): string {
+  return LISTING_SELECTOR_PROMPT
     .replace('{html}', html)
-    .replace('{feedback}', feedback ? `\n## 이전 시도 실패 원인\n${feedback}\n위 문제를 수정하여 새로운 XPath를 생성하세요.\n` : '');
+    .replace('{feedback}', feedback ? `\n## 이전 시도 실패 원인\n${feedback}\n위 문제를 수정하여 새로운 셀렉터를 생성하세요.\n` : '');
 }
 
-export function buildPDPXPathPrompt(html: string, feedback?: string): string {
-  return PDP_XPATH_PROMPT
+export function buildPDPSelectorPrompt(html: string, feedback?: string): string {
+  return PDP_SELECTOR_PROMPT
     .replace('{html}', html)
-    .replace('{feedback}', feedback ? `\n## 이전 시도 실패 원인\n${feedback}\n위 문제를 수정하여 새로운 XPath를 생성하세요.\n` : '');
+    .replace('{feedback}', feedback ? `\n## 이전 시도 실패 원인\n${feedback}\n위 문제를 수정하여 새로운 셀렉터를 생성하세요.\n` : '');
 }
+
+// Backward compatibility aliases (deprecated)
+/** @deprecated Use LISTING_SELECTOR_PROMPT instead */
+export const LISTING_XPATH_PROMPT = LISTING_SELECTOR_PROMPT;
+/** @deprecated Use PDP_SELECTOR_PROMPT instead */
+export const PDP_XPATH_PROMPT = PDP_SELECTOR_PROMPT;
+/** @deprecated Use buildListingSelectorPrompt instead */
+export const buildListingXPathPrompt = buildListingSelectorPrompt;
+/** @deprecated Use buildPDPSelectorPrompt instead */
+export const buildPDPXPathPrompt = buildPDPSelectorPrompt;

@@ -55,7 +55,7 @@ describe('AnalyzerService', () => {
 
       expect(result.pageType).toBe(PageType.LISTING);
       expect(result.confidence).toBe(0.95);
-      expect(result.xpaths).toHaveProperty('productCard');
+      expect(result.selectors).toHaveProperty('productCard');
     });
 
     it('should detect PDP page type and generate XPaths', async () => {
@@ -84,7 +84,7 @@ describe('AnalyzerService', () => {
 
       expect(result.pageType).toBe(PageType.PDP);
       expect(result.confidence).toBe(0.9);
-      expect(result.xpaths).toHaveProperty('productName');
+      expect(result.selectors).toHaveProperty('productName');
     });
 
     it('should throw AnalysisException when confidence is too low', async () => {
@@ -185,7 +185,7 @@ describe('AnalyzerService', () => {
       );
 
       expect(result.pageType).toBe(PageType.PDP);
-      expect(result.xpaths).toHaveProperty('productName');
+      expect(result.selectors).toHaveProperty('productName');
     });
 
     it('should include feedback in XPath generation prompt', async () => {

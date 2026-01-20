@@ -7,8 +7,8 @@ import {
   SearchCrawlResultDto,
 } from '../dto';
 import { ExtractorService, ValidatorService, AnalyzerService } from '@/domain/services';
-import { IXPathRepository, IBrowserClient, ISiteBrowserClient, SiteType } from '@/domain/interfaces';
-import { PageType, XPathMap, ListingData } from '@/domain/entities';
+import { ISelectorRepository, IBrowserClient, ISiteBrowserClient, SiteType } from '@/domain/interfaces';
+import { PageType, SelectorMap, ListingData } from '@/domain/entities';
 import { INJECTION_TOKENS, extractDomain, createLogger } from '@/common';
 import { CoupangBrowserClient } from '@/infrastructure/browser';
 import { CrawlResultRepository } from '@/infrastructure/database/repositories/crawl-result.repository';
@@ -26,8 +26,8 @@ export class CrawlerService {
   private readonly MAX_RETRY_COUNT = 3;
 
   constructor(
-    @Inject(INJECTION_TOKENS.XPATH_REPOSITORY)
-    private readonly xpathRepository: IXPathRepository,
+    @Inject(INJECTION_TOKENS.SELECTOR_REPOSITORY)
+    private readonly selectorRepository: ISelectorRepository,
     @Inject(INJECTION_TOKENS.BROWSER_CLIENT)
     private readonly browserClient: IBrowserClient,
     private readonly extractorService: ExtractorService,
@@ -56,17 +56,17 @@ export class CrawlerService {
         autoFallback: true,
       });
 
-      let xpaths: XPathMap;
+      let selectors: SelectorMap;
       let pageType: PageType;
 
       if (!request.forceReanalyze) {
         const cached = context.pageType
-          ? await this.xpathRepository.findByDomain(context.domain, context.pageType)
+          ? await this.selectorRepository.findByDomain(context.domain, context.pageType)
           : null;
 
         if (cached) {
-          this.logger.log(`Using cached XPaths for ${context.domain}`);
-          xpaths = cached.xpaths;
+          this.logger.log(`Using cached selectors for ${context.domain}`);
+          selectors = cached.selectors;
           pageType = cached.pageType;
           context.cached = true;
         } else {
@@ -74,24 +74,24 @@ export class CrawlerService {
             ? await this.analyzerService.analyzeWithKnownType(html, context.pageType)
             : await this.analyzerService.analyze(html);
 
-          xpaths = analysis.xpaths;
+          selectors = analysis.selectors;
           pageType = analysis.pageType;
-          await this.xpathRepository.upsert(context.domain, pageType, xpaths);
-          this.logger.log(`New XPaths generated and cached for ${context.domain}`);
+          await this.selectorRepository.upsert(context.domain, pageType, selectors);
+          this.logger.log(`New selectors generated and cached for ${context.domain}`);
         }
       } else {
         const analysis = context.pageType
           ? await this.analyzerService.analyzeWithKnownType(html, context.pageType)
           : await this.analyzerService.analyze(html);
 
-        xpaths = analysis.xpaths;
+        selectors = analysis.selectors;
         pageType = analysis.pageType;
-        await this.xpathRepository.upsert(context.domain, pageType, xpaths);
+        await this.selectorRepository.upsert(context.domain, pageType, selectors);
       }
 
       // URL에서 origin 추출하여 상대 URL 정규화에 사용
       const baseUrl = this.extractBaseUrl(request.url);
-      const extractedData = this.extractorService.extract(html, xpaths, pageType, { baseUrl });
+      const extractedData = this.extractorService.extract(html, selectors, pageType, { baseUrl });
       const validation = this.validatorService.validate(extractedData, pageType);
 
       if (validation.isValid) {
@@ -191,18 +191,18 @@ export class CrawlerService {
 
       // === 1. 캐시 확인 및 품질 검증 ===
       if (!request.forceReanalyze) {
-        const cachedXPaths = await this.xpathRepository.findByDomain(
+        const cachedSelectors = await this.selectorRepository.findByDomain(
           domain,
           PageType.LISTING,
         );
 
-        if (cachedXPaths) {
-          this.logger.log(`Testing cached XPaths for ${domain}`);
+        if (cachedSelectors) {
+          this.logger.log(`Testing cached selectors for ${domain}`);
 
-          // 캐시된 XPath로 추출
+          // 캐시된 셀렉터로 추출
           const extractedData = this.extractorService.extract(
             html,
-            cachedXPaths.xpaths,
+            cachedSelectors.selectors,
             PageType.LISTING,
             { baseUrl },
           ) as ListingData;
@@ -242,13 +242,13 @@ export class CrawlerService {
           this.logger.warn(
             `Cache validation failed: ${quality.validProducts}/${quality.totalProducts} valid (${quality.qualityScore}%), ${quality.priceValidProducts} with valid price`,
           );
-          await this.xpathRepository.invalidate(domain, PageType.LISTING);
-          feedback = this.validatorService.generateQualityFeedback(quality, cachedXPaths.xpaths);
-          this.logger.log(`Cache invalidated for ${domain}, will regenerate XPaths`);
+          await this.selectorRepository.invalidate(domain, PageType.LISTING);
+          feedback = this.validatorService.generateQualityFeedback(quality, cachedSelectors.selectors);
+          this.logger.log(`Cache invalidated for ${domain}, will regenerate selectors`);
         }
       }
 
-      // === 2. LLM으로 XPath 생성 (재시도 루프) ===
+      // === 2. LLM으로 셀렉터 생성 (재시도 루프) ===
       while (retryCount < this.MAX_RETRY_COUNT) {
         try {
           // LLM 분석
@@ -257,13 +257,13 @@ export class CrawlerService {
             PageType.LISTING,
             feedback,
           );
-          const xpaths = analysis.xpaths;
-          this.logger.log(`Generated XPaths (attempt ${retryCount + 1}): ${JSON.stringify(xpaths)}`);
+          const selectors = analysis.selectors;
+          this.logger.log(`Generated selectors (attempt ${retryCount + 1}): ${JSON.stringify(selectors)}`);
 
           // 데이터 추출
           const extractedData = this.extractorService.extract(
             html,
-            xpaths,
+            selectors,
             PageType.LISTING,
             { baseUrl },
           ) as ListingData;
@@ -273,9 +273,9 @@ export class CrawlerService {
 
           if (this.extractorService.isQualityAcceptable(quality)) {
             // 성공 → 캐시 저장
-            await this.xpathRepository.upsert(domain, PageType.LISTING, xpaths);
+            await this.selectorRepository.upsert(domain, PageType.LISTING, selectors);
             this.logger.log(
-              `XPath generation success (attempt ${retryCount + 1}): ${quality.validProducts}/${quality.totalProducts} valid`,
+              `Selector generation success (attempt ${retryCount + 1}): ${quality.validProducts}/${quality.totalProducts} valid`,
             );
 
             // 기존 검증도 실행
@@ -308,7 +308,7 @@ export class CrawlerService {
           }
 
           // 품질 미달 → 피드백 생성 후 재시도
-          feedback = this.validatorService.generateQualityFeedback(quality, xpaths);
+          feedback = this.validatorService.generateQualityFeedback(quality, selectors);
           this.logger.warn(
             `Quality check failed (attempt ${retryCount + 1}/${this.MAX_RETRY_COUNT}): ${quality.qualityScore}% valid, ${quality.priceValidProducts} valid prices`,
           );

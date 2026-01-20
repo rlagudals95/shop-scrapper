@@ -1,6 +1,6 @@
 import { Command, CommandRunner, Option, SubCommand } from 'nest-commander';
 import { Inject } from '@nestjs/common';
-import { IXPathRepository } from '@/domain/interfaces';
+import { ISelectorRepository } from '@/domain/interfaces';
 import { INJECTION_TOKENS } from '@/common';
 
 interface CacheCommandOptions {
@@ -12,12 +12,12 @@ interface CacheCommandOptions {
 
 @Command({
   name: 'cache',
-  description: 'Manage XPath cache',
+  description: 'Manage selector cache',
 })
 export class CacheCommand extends CommandRunner {
   constructor(
-    @Inject(INJECTION_TOKENS.XPATH_REPOSITORY)
-    private readonly xpathRepository: IXPathRepository,
+    @Inject(INJECTION_TOKENS.SELECTOR_REPOSITORY)
+    private readonly selectorRepository: ISelectorRepository,
   ) {
     super();
   }
@@ -31,15 +31,15 @@ export class CacheCommand extends CommandRunner {
       await this.clearSiteCache(options.site);
     } else {
       console.log('Usage:');
-      console.log('  cache --list                    List all cached XPaths');
+      console.log('  cache --list                    List all cached selectors');
       console.log('  cache --clear --site <domain>   Clear cache for a specific site');
-      console.log('  cache --clear-all               Clear all cached XPaths');
+      console.log('  cache --clear-all               Clear all cached selectors');
     }
   }
 
   @Option({
     flags: '--list',
-    description: 'List all cached XPaths',
+    description: 'List all cached selectors',
   })
   parseList(): boolean {
     return true;
@@ -55,7 +55,7 @@ export class CacheCommand extends CommandRunner {
 
   @Option({
     flags: '--clear-all',
-    description: 'Clear all cached XPaths',
+    description: 'Clear all cached selectors',
   })
   parseClearAll(): boolean {
     return true;
@@ -70,33 +70,33 @@ export class CacheCommand extends CommandRunner {
   }
 
   private async listCache(): Promise<void> {
-    const caches = await this.xpathRepository.findAll();
+    const caches = await this.selectorRepository.findAll();
 
     if (caches.length === 0) {
-      console.log('No cached XPaths found.');
+      console.log('No cached selectors found.');
       return;
     }
 
-    console.log('\n--- Cached XPaths ---\n');
+    console.log('\n--- Cached Selectors ---\n');
     for (const cache of caches) {
       console.log(`Domain: ${cache.siteDomain}`);
       console.log(`Page Type: ${cache.pageType}`);
       console.log(`Updated: ${cache.updatedAt?.toISOString() || 'N/A'}`);
-      console.log('XPaths:');
-      for (const [field, xpath] of Object.entries(cache.xpaths)) {
-        console.log(`  ${field}: ${xpath}`);
+      console.log('Selectors:');
+      for (const [field, selector] of Object.entries(cache.selectors)) {
+        console.log(`  ${field}: ${selector}`);
       }
       console.log('');
     }
   }
 
   private async clearSiteCache(site: string): Promise<void> {
-    await this.xpathRepository.invalidate(site);
+    await this.selectorRepository.invalidate(site);
     console.log(`Cache cleared for: ${site}`);
   }
 
   private async clearAllCache(): Promise<void> {
-    await this.xpathRepository.clearAll();
+    await this.selectorRepository.clearAll();
     console.log('All cache cleared.');
   }
 }

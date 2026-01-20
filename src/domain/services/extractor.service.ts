@@ -5,11 +5,11 @@ import {
   ExtractedData,
   ListingData,
   ListingProduct,
-  ListingXPathMap,
+  ListingSelectorMap,
   PageType,
   PDPData,
-  PDPXPathMap,
-  XPathMap,
+  PDPSelectorMap,
+  SelectorMap,
 } from '../entities';
 
 type CheerioRoot = ReturnType<typeof cheerio.load>;
@@ -66,11 +66,11 @@ export class ExtractorService {
   private readonly logger = createLogger(ExtractorService.name);
 
   /**
-   * 하이브리드 추출: JSON-LD 우선, XPath fallback
+   * 하이브리드 추출: JSON-LD 우선, CSS Selector fallback
    */
   extractWithFallback(
     html: string,
-    xpaths: XPathMap | null,
+    selectors: SelectorMap | null,
     pageType: PageType,
     options?: ExtractOptions,
   ): ExtractionResult {
@@ -85,12 +85,12 @@ export class ExtractorService {
           productCount: jsonLdData.products.length,
         };
       }
-      this.logger.log('JSON-LD not available or empty, falling back to XPath');
+      this.logger.log('JSON-LD not available or empty, falling back to CSS selectors');
     }
 
-    // 2. XPath fallback
-    if (!xpaths) {
-      this.logger.warn('No XPath provided and JSON-LD unavailable');
+    // 2. CSS Selector fallback
+    if (!selectors) {
+      this.logger.warn('No selectors provided and JSON-LD unavailable');
       return {
         data: { products: [] } as ListingData,
         source: 'xpath',
@@ -98,11 +98,11 @@ export class ExtractorService {
       };
     }
 
-    const xpathData = this.extract(html, xpaths, pageType, options);
-    const productCount = 'products' in xpathData ? xpathData.products.length : 1;
+    const selectorData = this.extract(html, selectors, pageType, options);
+    const productCount = 'products' in selectorData ? selectorData.products.length : 1;
 
     return {
-      data: xpathData,
+      data: selectorData,
       source: 'xpath',
       productCount,
     };
@@ -146,14 +146,14 @@ export class ExtractorService {
   }
 
   /**
-   * XPath 기반 추출 (기존 로직)
+   * CSS 셀렉터 기반 추출 (기존 로직)
    */
-  extract(html: string, xpaths: XPathMap, pageType: PageType, options?: ExtractOptions): ExtractedData {
+  extract(html: string, selectors: SelectorMap, pageType: PageType, options?: ExtractOptions): ExtractedData {
     try {
       if (pageType === PageType.LISTING) {
-        return this.extractListing(html, xpaths as ListingXPathMap, options);
+        return this.extractListing(html, selectors as ListingSelectorMap, options);
       } else {
-        return this.extractPDP(html, xpaths as PDPXPathMap);
+        return this.extractPDP(html, selectors as PDPSelectorMap);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -161,18 +161,18 @@ export class ExtractorService {
     }
   }
 
-  private extractListing(html: string, xpaths: ListingXPathMap, options?: ExtractOptions): ListingData {
+  private extractListing(html: string, selectors: ListingSelectorMap, options?: ExtractOptions): ListingData {
     const $ = cheerio.load(html);
     const products: ListingData['products'] = [];
 
-    this.logger.debug(`XPaths received: ${JSON.stringify(xpaths)}`);
+    this.logger.debug(`Selectors received: ${JSON.stringify(selectors)}`);
 
-    if (!xpaths || !xpaths.productCard) {
-      this.logger.warn('No productCard xpath provided');
+    if (!selectors || !selectors.productCard) {
+      this.logger.warn('No productCard selector provided');
       return { products };
     }
 
-    const containerSelector = this.xpathToSelector(xpaths.productCard);
+    const containerSelector = this.toSelector(selectors.productCard);
     this.logger.debug(`Container selector: "${containerSelector}"`);
 
     const productCards = $(containerSelector);
@@ -181,10 +181,10 @@ export class ExtractorService {
     productCards.each((_: number, element: cheerio.Element) => {
       const $card = $(element);
 
-      const name = xpaths.name ? this.extractFromElement($, $card, xpaths.name) : null;
-      const price = xpaths.price ? this.extractFromElement($, $card, xpaths.price) : null;
-      const rawUrl = xpaths.url ? this.extractAttrFromElement($, $card, xpaths.url) : null;
-      const thumbnail = xpaths.thumbnail ? this.extractImageSrc($, $card, xpaths.thumbnail) : null;
+      const name = selectors.name ? this.extractFromElement($, $card, selectors.name) : null;
+      const price = selectors.price ? this.extractFromElement($, $card, selectors.price) : null;
+      const rawUrl = selectors.url ? this.extractAttrFromElement($, $card, selectors.url) : null;
+      const thumbnail = selectors.thumbnail ? this.extractImageSrc($, $card, selectors.thumbnail) : null;
 
       // URL 정규화: 상대 경로 → 절대 경로
       const url = this.normalizeUrl(rawUrl, options?.baseUrl);
@@ -203,37 +203,37 @@ export class ExtractorService {
     return { products };
   }
 
-  private extractPDP(html: string, xpaths: PDPXPathMap): PDPData {
+  private extractPDP(html: string, selectors: PDPSelectorMap): PDPData {
     const $ = cheerio.load(html);
 
     return {
-      brandName: xpaths.brandName
-        ? this.extractText($, xpaths.brandName)
+      brandName: selectors.brandName
+        ? this.extractText($, selectors.brandName)
         : null,
-      productName: this.extractText($, xpaths.productName) || '',
-      price: this.extractText($, xpaths.price) || '',
-      description: xpaths.description
-        ? this.extractText($, xpaths.description)
+      productName: this.extractText($, selectors.productName) || '',
+      price: this.extractText($, selectors.price) || '',
+      description: selectors.description
+        ? this.extractText($, selectors.description)
         : null,
-      options: xpaths.options
-        ? this.extractMultipleTexts($, xpaths.options)
+      options: selectors.options
+        ? this.extractMultipleTexts($, selectors.options)
         : [],
-      detailImages: xpaths.detailImages
-        ? this.extractMultipleAttrs($, xpaths.detailImages)
+      detailImages: selectors.detailImages
+        ? this.extractMultipleAttrs($, selectors.detailImages)
         : [],
     };
   }
 
-  private xpathToSelector(xpathStr: string): string {
-    if (!xpathStr || typeof xpathStr !== 'string') {
-      this.logger.warn(`Invalid xpath: ${xpathStr}`);
+  private toSelector(selectorStr: string): string {
+    if (!selectorStr || typeof selectorStr !== 'string') {
+      this.logger.warn(`Invalid selector: ${selectorStr}`);
       return '';
     }
 
     try {
-      let selector = xpathStr;
+      let selector = selectorStr;
 
-      // CSS 셀렉터인지 XPath인지 감지
+      // CSS 셀렉터인지 레거시 XPath인지 감지
       // CSS 속성 셀렉터 패턴: [attr="value"], [attr*="value"] 등
       const hasCSSSelectorPattern = /\[[\w-]+[\*\^\$]?=["'][^"']+["']\]/.test(selector);
       // XPath 특징: //, ./, .//, contains(@class), text()
@@ -241,9 +241,9 @@ export class ExtractorService {
       const hasXPathPattern = /^\/\/|^\.\/|contains\(@|text\(\)/.test(selector);
 
       // CSS 셀렉터 패턴이 있고, 진짜 XPath 패턴이 없으면 CSS로 처리
-      const isXPath = !hasCSSSelectorPattern && hasXPathPattern;
+      const isLegacyXPath = !hasCSSSelectorPattern && hasXPathPattern;
 
-      if (!isXPath) {
+      if (!isLegacyXPath) {
         // 이미 CSS 셀렉터인 경우 - 속성 마커만 제거하고 반환
         selector = selector.replace(/\/@[\w-]+$/, '');
         // CSS 셀렉터에서 대괄호 안의 대괄호를 이스케이프 (e.g., fw-text-[20px] → fw-text-\[20px\])
@@ -252,7 +252,7 @@ export class ExtractorService {
         return selector;
       }
 
-      // === XPath를 CSS로 변환 ===
+      // === 레거시 XPath를 CSS로 변환 ===
 
       // 0. XPath union (|) 처리 - 첫 번째 경로만 사용
       if (selector.includes(' | ')) {
@@ -304,7 +304,7 @@ export class ExtractorService {
 
         // contains(@class) 패턴 처리
         const allContainsMatches = cssPart.matchAll(/contains\(@class,\s*['"]([^'"]+)['"]\)/g);
-        const classNames = Array.from(allContainsMatches).map((m) => m[1]);
+        const classNames = Array.from(allContainsMatches).map((m: RegExpMatchArray) => m[1]);
 
         if (classNames.length > 0) {
           const cssClasses = classNames.map((className) => `[class*="${className}"]`);
@@ -328,10 +328,10 @@ export class ExtractorService {
       // XPath에서 변환된 CSS 셀렉터도 이스케이프 적용
       selector = this.escapeBracketsInSelector(selector);
 
-      this.logger.debug(`XPath "${xpathStr}" -> CSS "${selector}"`);
+      this.logger.debug(`Legacy XPath "${selectorStr}" -> CSS "${selector}"`);
       return selector;
     } catch (error) {
-      this.logger.warn(`Failed to convert xpath: ${xpathStr}`, error);
+      this.logger.warn(`Failed to convert selector: ${selectorStr}`, error);
       return '';
     }
   }
@@ -339,11 +339,11 @@ export class ExtractorService {
   private extractFromElement(
     $: CheerioRoot,
     $context: cheerio.Cheerio,
-    xpathStr: string,
+    selectorStr: string,
   ): string | null {
-    const selector = this.xpathToSelector(xpathStr);
+    const selector = this.toSelector(selectorStr);
     if (!selector) {
-      this.logger.debug(`Empty selector for xpath: ${xpathStr}`);
+      this.logger.debug(`Empty selector for: ${selectorStr}`);
       return null;
     }
 
@@ -414,7 +414,7 @@ export class ExtractorService {
 
     const attrMatch = xpathStr.match(/@(\w+)$/);
     const attrName = attrMatch ? attrMatch[1] : null;
-    const selector = this.xpathToSelector(xpathStr);
+    const selector = this.toSelector(xpathStr);
 
     if (!selector) return null;
 
@@ -443,7 +443,7 @@ export class ExtractorService {
       return this.getImageSrcWithFallback($img);
     }
 
-    const selector = this.xpathToSelector(xpathStr);
+    const selector = this.toSelector(xpathStr);
     if (!selector) return null;
 
     const $element = $context.find(selector);
@@ -505,7 +505,7 @@ export class ExtractorService {
   }
 
   private extractText($: CheerioRoot, xpathStr: string): string | null {
-    const selector = this.xpathToSelector(xpathStr);
+    const selector = this.toSelector(xpathStr);
     if (!selector) return null;
 
     const $element = $(selector);
@@ -515,7 +515,7 @@ export class ExtractorService {
   }
 
   private extractMultipleTexts($: CheerioRoot, xpathStr: string): string[] {
-    const selector = this.xpathToSelector(xpathStr);
+    const selector = this.toSelector(xpathStr);
     if (!selector) return [];
 
     const results: string[] = [];
@@ -530,7 +530,7 @@ export class ExtractorService {
   private extractMultipleAttrs($: CheerioRoot, xpathStr: string): string[] {
     const attrMatch = xpathStr.match(/@(\w+)$/);
     const attrName = attrMatch ? attrMatch[1] : 'src';
-    const selector = this.xpathToSelector(xpathStr);
+    const selector = this.toSelector(xpathStr);
 
     if (!selector) return [];
 
