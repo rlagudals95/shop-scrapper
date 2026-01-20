@@ -1,4 +1,4 @@
-import { IAiClient, AiResponse } from '../../src/domain/interfaces';
+import { AiResponse, IAiClient } from '../../src/domain/interfaces';
 
 export class MockGeminiClient implements IAiClient {
   private responses: Map<string, string> = new Map();
@@ -7,7 +7,12 @@ export class MockGeminiClient implements IAiClient {
     this.responses.set(promptContains, response);
   }
 
+  clearResponses(): void {
+    this.responses.clear();
+  }
+
   async generate(prompt: string): Promise<AiResponse> {
+    // Check custom responses first
     for (const [key, value] of this.responses.entries()) {
       if (prompt.includes(key)) {
         return {
@@ -17,6 +22,7 @@ export class MockGeminiClient implements IAiClient {
       }
     }
 
+    // Default responses for page type detection
     if (prompt.includes('페이지 유형을 판별')) {
       return {
         content: JSON.stringify({
@@ -28,27 +34,29 @@ export class MockGeminiClient implements IAiClient {
       };
     }
 
+    // Default response for listing XPath generation
     if (prompt.includes('목록 페이지')) {
       return {
         content: JSON.stringify({
           productCard: "//li[contains(@class, 'search-product')]",
           thumbnail: ".//img[@class='thumbnail']/@src",
-          name: ".//div[@class='name']/text()",
-          price: ".//span[@class='price-value']/text()",
+          name: ".//div[@class='name']",
+          price: ".//span[@class='price-value']",
           url: ".//a[@class='product-link']/@href",
         }),
         usage: { promptTokens: 100, completionTokens: 50 },
       };
     }
 
+    // Default response for PDP XPath generation
     if (prompt.includes('상품 상세 페이지')) {
       return {
         content: JSON.stringify({
-          brandName: "//span[@class='brand']/text()",
-          productName: "//h1[@class='product-title']/text()",
-          price: "//span[@class='sale-price']/text()",
+          brandName: "//span[@class='brand']",
+          productName: "//h1[@class='product-title']",
+          price: "//span[@class='sale-price']",
           description: "//div[@class='product-description']",
-          options: "//select[@class='option-select']/option/text()",
+          options: "//select[@class='option-select']/option",
           detailImages: "//div[@class='detail-images']//img/@src",
         }),
         usage: { promptTokens: 100, completionTokens: 50 },

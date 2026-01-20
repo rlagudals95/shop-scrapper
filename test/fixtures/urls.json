@@ -1,0 +1,18 @@
+{
+    "coupang": {
+        "listing": [
+            "https://www.coupang.com/np/search?component=&q=%ED%97%A4%EC%96%B4%EB%B0%B4%EB%93%9C"
+        ],
+        "pdp": [
+            "https://www.coupang.com/vp/products/12345"
+        ]
+    },
+    "naver": {
+        "listing": [
+            "https://search.shopping.naver.com/search/all?query=%EB%A3%B0%EB%A3%A8%EB%A0%88%EB%AA%AC%20%ED%97%A4%EC%96%B4%EB%B0%B4%EB%93%9C&frm=NVSCPRO&nl-ts-pid=jTVgUdqosAKssAYxv1G-202402"
+        ],
+        "pdp": [
+            "https://smartstore.naver.com/k_mall1/products/11591756016?NaPm=ct%3Dmkhvj8yo%7Cci%3Dc6b35e2f6f293373c511a87ea597bbb8650179d2%7Ctr%3Dslsl%7Csn%3D12173630%7Chk%3Dbc29613d38b86747886e2e2c04d0a15b9fb4e8e5&nl-au=dcc55544bb80404da3544d5388e99995&nl-query=%EB%A3%B0%EB%A3%A8%EB%A0%88%EB%AA%AC+%ED%97%A4%EC%96%B4%EB%B0%B4%EB%93%9C"
+        ]
+    }
+}

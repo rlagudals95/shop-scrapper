@@ -4,10 +4,12 @@ import {
   ExtractedData,
   ListingData,
   PDPData,
+  SelectorMap,
   isListingData,
 } from '../entities';
 import { ValidationError } from '@/common';
 import { createLogger, isEmpty } from '@/common';
+import { ExtractionQuality } from './extractor.service';
 
 export interface ValidationRule {
   field: string;
@@ -243,5 +245,70 @@ export class ValidatorService {
     ];
 
     return feedback.join('\n');
+  }
+
+  /**
+   * 품질 기반 피드백 생성 (더 구체적인 피드백)
+   * - 추출 품질 지표와 현재 셀렉터를 기반으로 개선 방향 제시
+   */
+  generateQualityFeedback(
+    quality: ExtractionQuality,
+    selectors: SelectorMap,
+  ): string {
+    const issues: string[] = [];
+
+    // 유효 상품 비율 문제
+    if (quality.qualityScore < 50) {
+      issues.push(
+        `name 또는 url이 누락된 상품이 ${100 - quality.qualityScore}%입니다.`,
+      );
+      if (selectors.name) {
+        issues.push(
+          `현재 name 셀렉터: "${selectors.name}" - 더 정확한 셀렉터가 필요합니다.`,
+        );
+      }
+    }
+
+    // 가격 추출 문제 (할인율 vs 실제 가격)
+    if (quality.priceValidProducts < quality.totalProducts * 0.3) {
+      issues.push(
+        `가격 추출이 실패했습니다. 현재 셀렉터가 할인율(%)을 추출하고 있을 수 있습니다.`,
+      );
+      if (selectors.price) {
+        issues.push(`현재 price 셀렉터: "${selectors.price}"`);
+      }
+      issues.push(
+        `실제 판매 가격(예: "10,630원")을 포함하는 요소를 선택해주세요.`,
+      );
+      issues.push(`할인율(예: "29%")이 아닌 최종 가격 요소를 타겟팅하세요.`);
+    }
+
+    // 상품 수 부족
+    if (quality.totalProducts < 5) {
+      issues.push(
+        `추출된 상품이 ${quality.totalProducts}개로 너무 적습니다.`,
+      );
+      if (selectors.productCard) {
+        issues.push(`현재 productCard 셀렉터: "${selectors.productCard}"`);
+      }
+      issues.push(`더 많은 상품을 포함하는 상위 컨테이너를 선택해주세요.`);
+    }
+
+    return [
+      '## 이전 셀렉터 분석 결과가 품질 기준을 충족하지 못했습니다.',
+      '',
+      '### 추출 결과:',
+      `- 총 상품: ${quality.totalProducts}개`,
+      `- 유효 상품: ${quality.validProducts}개 (${quality.qualityScore}%)`,
+      `- 가격 유효: ${quality.priceValidProducts}개`,
+      '',
+      '### 문제점:',
+      ...issues.map((i) => `- ${i}`),
+      '',
+      '### 요청사항:',
+      '- 가격은 반드시 "XX,XXX원" 형태의 실제 판매 가격을 추출해야 합니다.',
+      '- 할인율(%)이 아닌 최종 가격 요소를 선택하세요.',
+      '- 상품명은 실제 상품 타이틀을 포함하는 가장 구체적인 요소를 선택하세요.',
+    ].join('\n');
   }
 }

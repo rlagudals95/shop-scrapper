@@ -26,3 +26,11 @@ test-results
 
 # OS
 .DS_Store
+
+# data
+data
+
+# browser-profile
+browser-profile
+html-output
+browser-profile-proxy

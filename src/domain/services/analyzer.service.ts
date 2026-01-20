@@ -1,16 +1,16 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { PageType, XPathMap } from '../entities';
+import { PageType, SelectorMap } from '../entities';
 import { IAiClient } from '@/domain/interfaces';
 import { INJECTION_TOKENS, AnalysisException, createLogger } from '@/common';
 import {
   buildPageTypePrompt,
-  buildListingXPathPrompt,
-  buildPDPXPathPrompt,
+  buildListingSelectorPrompt,
+  buildPDPSelectorPrompt,
 } from '@/infrastructure/ai/prompts';
 
 export interface AnalyzerResult {
   pageType: PageType;
-  xpaths: XPathMap;
+  selectors: SelectorMap;
   confidence: number;
   rawResponse?: string;
 }
@@ -43,7 +43,7 @@ export class AnalyzerService {
       );
     }
 
-    const xpaths = await this.generateXPaths(
+    const selectors = await this.generateSelectors(
       simplifiedHtml,
       pageType.pageType === 'LISTING' ? PageType.LISTING : PageType.PDP,
       feedback,
@@ -51,7 +51,7 @@ export class AnalyzerService {
 
     return {
       pageType: pageType.pageType === 'LISTING' ? PageType.LISTING : PageType.PDP,
-      xpaths,
+      selectors,
       confidence: pageType.confidence,
     };
   }
@@ -62,11 +62,11 @@ export class AnalyzerService {
     feedback?: string,
   ): Promise<AnalyzerResult> {
     const simplifiedHtml = this.simplifyHtml(html);
-    const xpaths = await this.generateXPaths(simplifiedHtml, pageType, feedback);
+    const selectors = await this.generateSelectors(simplifiedHtml, pageType, feedback);
 
     return {
       pageType,
-      xpaths,
+      selectors,
       confidence: 1.0,
     };
   }
@@ -89,27 +89,101 @@ export class AnalyzerService {
     }
   }
 
-  private async generateXPaths(
+  private async generateSelectors(
     html: string,
     pageType: PageType,
     feedback?: string,
-  ): Promise<XPathMap> {
+  ): Promise<SelectorMap> {
     const prompt =
       pageType === PageType.LISTING
-        ? buildListingXPathPrompt(html, feedback)
-        : buildPDPXPathPrompt(html, feedback);
+        ? buildListingSelectorPrompt(html, feedback)
+        : buildPDPSelectorPrompt(html, feedback);
 
     const response = await this.aiClient.generate(prompt);
+    this.logger.log(`AI Raw Response: ${response.content}`);
 
     try {
-      const xpaths = this.parseJsonResponse<XPathMap>(response.content);
-      this.logger.debug(`Generated XPaths: ${JSON.stringify(xpaths)}`);
-      return xpaths;
+      const rawResponse = this.parseJsonResponse<Record<string, unknown>>(response.content);
+      const selectors = this.normalizeSelectorResponse(rawResponse, pageType);
+      this.logger.log(`Generated Selectors: ${JSON.stringify(selectors, null, 2)}`);
+      return selectors;
     } catch (error) {
+      this.logger.error(`Failed to parse AI response: ${response.content.substring(0, 1000)}`);
       throw new AnalysisException(
-        `Failed to parse XPath response: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to parse selector response: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /**
+   * LLM 응답을 표준 SelectorMap 형식으로 변환
+   * CSS 셀렉터 형식: { productCard, fields: { name: { selectors: [...], attribute: ... } } }
+   * 레거시 XPath 형식: { productCard, fields: { name: { xpaths: [...] } } }
+   * 기존 형식: { productCard, name, price, url, thumbnail }
+   */
+  private normalizeSelectorResponse(raw: Record<string, unknown>, pageType: PageType): SelectorMap {
+    // 이미 기존 형식인 경우 (name이 string)
+    if (typeof raw.name === 'string' || typeof raw.productName === 'string') {
+      return raw as SelectorMap;
+    }
+
+    // 새 형식 (fields 중첩 구조)
+    if (raw.fields && typeof raw.fields === 'object') {
+      const fields = raw.fields as Record<string, {
+        xpaths?: string[];
+        selectors?: string[];
+        attribute?: string | null;
+        fallbackAttributes?: string[];
+        confidence?: number;
+      }>;
+
+      // CSS 셀렉터 또는 XPath에서 값 추출 (여러 셀렉터를 ,로 연결)
+      const getSelector = (field?: {
+        xpaths?: string[];
+        selectors?: string[];
+        attribute?: string | null;
+      }): string | undefined => {
+        // CSS 셀렉터 형식 우선
+        if (field?.selectors && field.selectors.length > 0) {
+          // 여러 셀렉터를 CSS OR 연산자(,)로 연결
+          // 예: "[class*='priceValue'], [class*='salePrice']"
+          const combinedSelector = field.selectors.join(', ');
+          // 속성 추출이 필요한 경우 (href, src 등) 마커 추가
+          if (field.attribute) {
+            return `${combinedSelector}/@${field.attribute}`;
+          }
+          return combinedSelector;
+        }
+        // XPath 형식
+        const xpath = field?.xpaths?.[0];
+        return xpath && xpath.length > 0 ? xpath : undefined;
+      };
+
+      if (pageType === PageType.LISTING) {
+        return {
+          productCard: raw.productCard as string,
+          name: getSelector(fields.name),
+          price: getSelector(fields.price),
+          url: getSelector(fields.url),
+          thumbnail: getSelector(fields.thumbnail),
+        };
+      } else {
+        // PDP
+        const pdpFields = raw as Record<string, { xpaths?: string[]; selectors?: string[]; confidence?: number }>;
+        return {
+          productName: getSelector(pdpFields.productName),
+          price: getSelector(pdpFields.price),
+          brandName: getSelector(pdpFields.brandName),
+          description: getSelector(pdpFields.description),
+          options: getSelector(pdpFields.options),
+          detailImages: getSelector(pdpFields.detailImages),
+        };
+      }
+    }
+
+    // 알 수 없는 형식
+    this.logger.warn(`Unknown selector response format: ${JSON.stringify(raw).substring(0, 500)}`);
+    return raw as SelectorMap;
   }
 
   private parseJsonResponse<T>(response: string): T {

@@ -1,9 +1,8 @@
+import { AnalysisException, createLogger } from '@/common';
+import { AiResponse, IAiClient } from '@/domain/interfaces';
+import { GenerativeModel, GoogleGenerativeAI } from '@google/generative-ai';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { IAiClient, AiResponse } from '@/domain/interfaces';
-import { AnalysisException } from '@/common';
-import { createLogger } from '@/common';
 
 @Injectable()
 export class GeminiClient implements IAiClient {
@@ -17,7 +16,7 @@ export class GeminiClient implements IAiClient {
       throw new Error('GEMINI_API_KEY is not configured');
     }
     const genAI = new GoogleGenerativeAI(apiKey);
-    this.model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    this.model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   }
 
   async generate(prompt: string): Promise<AiResponse> {
