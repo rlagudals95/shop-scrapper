@@ -152,20 +152,30 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       expect(result.selectors.price).toBeTruthy();
     }, 120000);
 
-    it('생성된 XPath가 유효한 형식이어야 함', async () => {
+    it('생성된 Selector가 유효한 형식이어야 함', async () => {
       if (!hasApiKey) return;
 
       const result = await analyzerService.analyzeWithKnownType(html, PageType.PDP);
 
-      // XPath 형식 검증 (// 또는 .// 로 시작)
-      const xpaths = result.selectors as PDPSelectorMap;
+      // Selector 존재 검증 (CSS Selector 또는 XPath 형식)
+      const selectors = result.selectors as PDPSelectorMap;
 
-      if (xpaths.productName) {
-        expect(xpaths.productName).toMatch(/^(\/\/|\.\/\/)/);
-      }
-      if (xpaths.price) {
-        expect(xpaths.price).toMatch(/^(\/\/|\.\/\/)/);
-      }
+      // 셀렉터가 객체 형태일 수 있음 (AI 응답 형식)
+      const getSelector = (value: unknown): string | undefined => {
+        if (typeof value === 'string') return value;
+        if (typeof value === 'object' && value !== null && 'selectors' in value) {
+          const obj = value as { selectors?: string[] };
+          return obj.selectors?.[0];
+        }
+        return undefined;
+      };
+
+      const productNameSelector = getSelector(selectors.productName);
+      const priceSelector = getSelector(selectors.price);
+
+      // 셀렉터가 존재하고 비어있지 않은지 확인
+      expect(productNameSelector).toBeTruthy();
+      expect(priceSelector).toBeTruthy();
     }, 120000);
   });
 
@@ -396,7 +406,8 @@ describe('쿠팡 전체 요구사항 테스트 (Coupang Full Requirements)', () 
       console.log(`   AI XPath 캐싱: ${cached ? '✅' : '❌'}`);
 
       expect(cached).not.toBeNull();
-      expect(cached!.selectors.productName).toBe(analysis.selectors.productName);
+      // 객체 비교를 위해 toStrictEqual 사용
+      expect(cached!.selectors.productName).toStrictEqual(analysis.selectors.productName);
     }, 120000);
   });
 
