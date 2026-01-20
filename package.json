@@ -32,7 +32,8 @@
     "test:coupang": "jest --testPathPattern=test/unit/coupang --verbose",
     "test:coupang:proxy": "rm -rf data/browser-profile-coupang && PROXY_ENABLED=true jest --testPathPattern=coupang-browser-client --no-coverage --runInBand",
     "test:coupang:e2e": "jest --testPathPattern=coupang-e2e-flow --verbose --runInBand",
-    "test:listing:xpath:extraction": "jest --testPathPattern=listing-xpath-extraction --verbose --runInBand"
+    "test:listing:xpath:extraction": "jest --testPathPattern=listing-xpath-extraction --verbose --runInBand",
+    "test:pdp:selector:extraction": "jest --testPathPattern=pdp-selector-extraction --verbose --runInBand"
   },
   "keywords": [
     "crawler",

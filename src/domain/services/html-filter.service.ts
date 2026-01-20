@@ -361,29 +361,305 @@ export class HtmlFilterService {
 
   /**
    * PDP 페이지용 HTML 필터링
+   * - 상품 정보 영역 (상품명, 가격, 브랜드, 옵션)
+   * - 상품 상세 설명 영역
+   * - 상세 이미지 영역
+   * - JSON-LD 구조화 데이터
    */
   filterForPDP(html: string, options?: HtmlFilterOptions): FilteredHtml {
+    const originalLength = html.length;
+    const $ = cheerio.load(html);
+
+    // 1. JSON-LD 추출 (제거 전에)
+    const jsonLd = this.extractJsonLd($);
+
+    // 2. PDP 주요 영역 추출 시도
+    const pdpRegionHtml = this.extractPDPRegion($);
+    if (pdpRegionHtml) {
+      this.logger.debug('PDP region extracted successfully');
+      const $region = cheerio.load(pdpRegionHtml);
+      return this.filterPDPRegion($region, originalLength, jsonLd, options);
+    }
+
+    // 3. 영역 추출 실패 시 기본 필터링
+    this.logger.debug('PDP region not found, using full HTML filtering');
     const pdpOptions: HtmlFilterOptions = {
       keepSelectors: [
+        // 상품 정보
         '[class*="product"]',
         '[class*="Product"]',
+        '[class*="prod-"]',
+        '[class*="goods"]',
+        '[class*="item"]',
+        // 가격
         '[class*="price"]',
         '[class*="Price"]',
+        '[class*="sale"]',
+        '[class*="cost"]',
+        // 상세 정보
         '[class*="detail"]',
+        '[class*="Detail"]',
         '[class*="info"]',
+        '[class*="Info"]',
         '[class*="description"]',
+        '[class*="desc"]',
+        // 옵션
         '[class*="option"]',
+        '[class*="Option"]',
+        'select',
+        // 이미지
         '[class*="image"]',
+        '[class*="Image"]',
+        '[class*="gallery"]',
+        '[class*="thumb"]',
+        // 브랜드
         '[class*="brand"]',
+        '[class*="Brand"]',
+        '[class*="seller"]',
+        // 제목
         'h1',
         'h2',
+        'title',
       ],
-      extractJsonLd: true,
-      maxLength: 80000,
+      removeSelectors: [
+        ...this.confusingElementSelectors,
+        // PDP에서 불필요한 요소
+        '[class*="review"]',
+        '[class*="Review"]',
+        '[class*="comment"]',
+        '[class*="qna"]',
+        '[class*="Q&A"]',
+        '[class*="recommend"]',
+        '[class*="related"]',
+        '[class*="similar"]',
+        ...(options?.removeSelectors || []),
+      ],
+      extractJsonLd: false, // 이미 추출함
+      maxLength: options?.maxLength || 100000, // PDP는 Listing보다 더 많은 컨텐츠 허용
       ...options,
     };
 
-    return this.filter(html, pdpOptions);
+    const result = this.filter(html, pdpOptions);
+    result.jsonLd = jsonLd;
+    return result;
+  }
+
+  /**
+   * PDP 주요 영역 추출
+   */
+  private extractPDPRegion($: ReturnType<typeof cheerio.load>): string | null {
+    // PDP 상품 정보 컨테이너 선택자 (사이트 독립적)
+    // 순서 중요: 가격 정보가 포함된 큰 영역을 먼저 찾아야 함
+    const pdpContainerSelectors = [
+      // 쿠팡 패턴 - prod-atf가 전체 상품 정보 영역 (ATF = Above The Fold)
+      '[class*="prod-atf"]',
+      '[class*="prodAtf"]',
+      // 범용 큰 영역 (우선순위 높음) - 네이버 스마트스토어는 해시 클래스 사용
+      '#content',
+      '[role="main"]',
+      'main',
+      // 네이버 스마트스토어 패턴
+      '[class*="_productDetail"]',
+      '[class*="ProductDetail"]',
+      '[class*="product_detail"]',
+      // 범용 패턴
+      '[class*="product-detail"]',
+      '[class*="productDetail"]',
+      '[class*="goods-detail"]',
+      '[class*="goodsDetail"]',
+      // 상품 페이지 메인 영역
+      'main[class*="product"]',
+      '.content',
+      '[class*="pdp"]',
+      '[class*="PDP"]',
+      // 하위 영역 (폴백) - product_info는 "상품정보 제공고시" 테이블에 매칭될 수 있으므로 후순위
+      '[class*="prod-buy"]',
+      '[class*="prodBuy"]',
+      '[class*="product_info"]',
+      '[class*="productInfo"]',
+    ];
+
+    // 가격 패턴: XX,XXX원 형태
+    const pricePattern = /\d{1,3}(,\d{3})*원/;
+
+    // 1차: 가격 정보가 포함된 충분히 큰 영역 찾기 (최소 10KB)
+    for (const selector of pdpContainerSelectors) {
+      try {
+        const container = $(selector);
+        if (container.length > 0) {
+          const html = container.first().html();
+          // 가격 패턴이 포함되고 10KB 이상인 영역 우선 선택
+          if (html && html.length > 10000 && pricePattern.test(html)) {
+            this.logger.debug(`PDP region found with selector: ${selector} (${html.length} bytes, has price)`);
+            return html;
+          }
+        }
+      } catch {
+        // 잘못된 선택자 무시
+      }
+    }
+
+    // 2차: 가격 없어도 충분히 큰 영역 찾기 (최소 5KB)
+    for (const selector of pdpContainerSelectors) {
+      try {
+        const container = $(selector);
+        if (container.length > 0) {
+          const html = container.first().html();
+          if (html && html.length > 5000) {
+            this.logger.debug(`PDP region found with selector: ${selector} (${html.length} bytes, fallback)`);
+            return html;
+          }
+        }
+      } catch {
+        // 잘못된 선택자 무시
+      }
+    }
+
+    // 3차: 기존 로직 (최소 1KB)
+    for (const selector of pdpContainerSelectors) {
+      try {
+        const container = $(selector);
+        if (container.length > 0) {
+          const html = container.first().html();
+          if (html && html.length > 1000) {
+            this.logger.debug(`PDP region found with selector: ${selector} (${html.length} bytes, minimal)`);
+            return html;
+          }
+        }
+      } catch {
+        // 잘못된 선택자 무시
+      }
+    }
+
+    // 상품 상세 이미지 영역도 포함
+    const detailImageSelectors = [
+      '[class*="detail-content"]',
+      '[class*="detailContent"]',
+      '[class*="product-content"]',
+      '[class*="productContent"]',
+      '[class*="goods-content"]',
+      '[class*="description-content"]',
+    ];
+
+    let combinedHtml = '';
+
+    // 상품 정보 영역 (body에서 주요 부분)
+    const mainContent = $('main, [role="main"], #content, .content').first();
+    if (mainContent.length > 0) {
+      combinedHtml = mainContent.html() || '';
+    }
+
+    // 상세 이미지 영역 추가
+    for (const selector of detailImageSelectors) {
+      try {
+        const detailContent = $(selector);
+        if (detailContent.length > 0) {
+          const detailHtml = detailContent.first().html();
+          if (detailHtml && detailHtml.length > 500) {
+            combinedHtml += '\n' + detailHtml;
+            this.logger.debug(`Detail image region added with selector: ${selector}`);
+          }
+        }
+      } catch {
+        // 무시
+      }
+    }
+
+    if (combinedHtml.length > 1000) {
+      return combinedHtml;
+    }
+
+    return null;
+  }
+
+  /**
+   * 추출된 PDP 영역 필터링
+   */
+  private filterPDPRegion(
+    $: ReturnType<typeof cheerio.load>,
+    originalLength: number,
+    jsonLd: unknown,
+    options?: HtmlFilterOptions,
+  ): FilteredHtml {
+    // 불필요한 요소 제거 (리뷰, 추천 상품 등)
+    const removeSelectors = [
+      '[class*="review"]',
+      '[class*="Review"]',
+      '[class*="comment"]',
+      '[class*="qna"]',
+      '[class*="recommend"]',
+      '[class*="related"]',
+      '[class*="similar"]',
+      '[class*="banner"]',
+      '[class*="modal"]',
+      '[class*="popup"]',
+      ...this.confusingElementSelectors,
+      ...(options?.removeSelectors || []),
+    ];
+
+    for (const selector of removeSelectors) {
+      try {
+        $(selector).remove();
+      } catch {
+        // 무시
+      }
+    }
+
+    // 불필요한 속성 제거
+    const keepAttrs = options?.keepAttributes || this.defaultKeepAttributes;
+    $('*').each((_, el) => {
+      if ('attribs' in el && el.attribs) {
+        const attrsToRemove: string[] = [];
+        for (const attr of Object.keys(el.attribs)) {
+          if (!keepAttrs.includes(attr) && !attr.startsWith('data-')) {
+            attrsToRemove.push(attr);
+          }
+        }
+        for (const attr of attrsToRemove) {
+          delete el.attribs[attr];
+        }
+      }
+    });
+
+    // 빈 요소 제거
+    $('div, span, p, section, article')
+      .filter(function () {
+        return $(this).children().length === 0 && $(this).text().trim().length === 0;
+      })
+      .remove();
+
+    // 공백 정리
+    let filtered = $.html()
+      .replace(/\s+/g, ' ')
+      .replace(/>\s+</g, '><')
+      .trim();
+
+    // 길이 제한
+    const maxLength = options?.maxLength || 100000;
+    if (filtered.length > maxLength) {
+      filtered = filtered.substring(0, maxLength);
+      const lastCloseTag = filtered.lastIndexOf('</');
+      if (lastCloseTag > maxLength * 0.9) {
+        filtered = filtered.substring(0, lastCloseTag);
+      }
+    }
+
+    const filteredLength = filtered.length;
+    const compressionRatio = Math.round(
+      ((originalLength - filteredLength) / originalLength) * 100,
+    );
+
+    this.logger.log(
+      `HTML filtered (PDP region): ${originalLength.toLocaleString()} → ${filteredLength.toLocaleString()} bytes (${compressionRatio}% reduced)`,
+    );
+
+    return {
+      html: filtered,
+      jsonLd,
+      originalLength,
+      filteredLength,
+      compressionRatio,
+    };
   }
 
   /**

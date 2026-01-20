@@ -122,41 +122,63 @@ export const PDP_SELECTOR_PROMPT = `
 You are a senior web scraping engineer.
 Given a product detail page (PDP) HTML, produce robust CSS selectors for key product info.
 
-### Hard rules
-- Use ONLY tokens that exist in the provided HTML (classes/ids/attributes/tags).
-- Do NOT guess. If not found, return empty candidates.
-- For dynamic/hashed classes, use [class*='stable_prefix'].
+### Hard rules (must follow)
+- Analyze ONLY the given HTML. Never invent class names, ids, attributes, or tags.
+- If a class/id/token is not present in the HTML, using it is invalid.
+- Prefer stable anchors: semantic attributes, data-* attributes, or repeated DOM structure.
+- For hashed/dynamic classes (e.g., name_ab12C), use [class*="name_"] with the stable prefix only.
+- AVOID utility/styling classes like "fw-text-[20px]", "fw-font-bold", "text-lg" when possible.
+- NEVER invent or guess class names that don't exist in the HTML.
 
 ### Extract fields
-Required:
-- productName
-- price (final sale price if multiple)
+**Required:**
+- productName: The main product title (usually in h1, h2, or title area)
+- price: The final sale price (숫자 + "원" format like "10,630원", NOT discount percentage like "29%")
 
-Optional:
-- brandName
-- description (prefer main description area; avoid shipping/returns)
-- options (the option container(s), not a single option)
-- detailImages (all detail image src/data-src/srcset)
+**Optional:**
+- brandName: The brand/manufacturer name (often near the product title)
+- description: Main product description (prefer detailed description, avoid shipping/returns info)
+- options: Option selectors (select elements, option buttons - get the container element)
+- detailImages: Detail/gallery images in the product description area (NOT thumbnail or banner)
+
+### CRITICAL - Price selector
+- Price MUST be the actual sale price in "XX,XXX원" format
+- Do NOT select discount rate elements (elements showing "29%", "44%" etc.)
+- Look for elements containing: "원", price numbers, or class names with "price", "sale", "cost"
+- If multiple prices exist, select the FINAL sale price, not the original price
+
+### CRITICAL - Options selector
+- For options, select the CONTAINER element that holds all options
+- Common patterns: select elements, div containing option buttons, [class*="option"] containers
+- The code will extract text from all child elements
+
+### CRITICAL - Detail Images selector
+- Select img elements in the product DETAIL/DESCRIPTION area
+- NOT the main thumbnail or gallery images at the top
+- Common locations: [class*="detail"], [class*="description"], [class*="content"] areas
+- Use /@src or /@data-src marker for attribute extraction
 
 ### CSS Selector constraints
-- Use the most specific element that contains the value (not the entire page section).
-- For attributes, use /@src /@data-src /@srcset markers at the end.
+- Use the most specific element that contains ONLY the target value
+- For attributes, use /@src /@data-src /@srcset markers at the end
+- Multiple selectors can be provided in the array for fallback
 
-### Output format (JSON only)
+### Output format (JSON only, no extra text)
 {
-  "productName": { "selectors": ["..."], "postprocess": "trim", "confidence": 0.0 },
-  "price": { "selectors": ["..."], "postprocess": "extract_number", "confidence": 0.0 },
-  "brandName": { "selectors": ["..."], "postprocess": "trim", "confidence": 0.0 },
-  "description": { "selectors": ["..."], "postprocess": "trim_html_or_text", "confidence": 0.0 },
-  "options": { "selectors": ["..."], "postprocess": "none", "confidence": 0.0 },
+  "productName": { "selectors": ["<most specific selector>"], "postprocess": "trim", "confidence": 0.0 },
+  "price": { "selectors": ["<selector for actual price, not discount%>"], "postprocess": "extract_number", "confidence": 0.0 },
+  "brandName": { "selectors": ["<brand element selector>"], "postprocess": "trim", "confidence": 0.0 },
+  "description": { "selectors": ["<description area selector>"], "postprocess": "trim_html_or_text", "confidence": 0.0 },
+  "options": { "selectors": ["<option container selector>"], "postprocess": "none", "confidence": 0.0 },
   "detailImages": {
-    "selectors": [".../@src", ".../@data-src", ".../@srcset"],
+    "selectors": ["<detail img selector>/@src", "<fallback>/@data-src"],
     "postprocess": "collect_urls",
     "confidence": 0.0
   }
 }
 
-If not present, use selectors: [] and confidence: 0.0.
+If a field is not found in HTML, use selectors: [] and confidence: 0.0.
+Set confidence roughly: 0.9 (very sure), 0.6 (likely), 0.3 (weak).
 
 {feedback}
 

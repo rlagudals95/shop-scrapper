@@ -49,12 +49,23 @@ export interface ExtractionResult {
   productCount: number;
 }
 
-/** 추출 품질 평가 결과 */
+/** 추출 품질 평가 결과 (Listing) */
 export interface ExtractionQuality {
   totalProducts: number;
   validProducts: number; // name + (price 또는 url) 있는 상품
   priceValidProducts: number; // 가격 패턴 매칭 (/[\d,]+원?/)
   qualityScore: number; // validProducts / totalProducts * 100
+}
+
+/** PDP 추출 품질 평가 결과 */
+export interface PDPExtractionQuality {
+  hasProductName: boolean;
+  hasPrice: boolean;
+  hasBrandName: boolean;
+  hasDescription: boolean;
+  optionsCount: number;
+  detailImagesCount: number;
+  qualityScore: number; // 0-100
 }
 
 export interface ExtractOptions {
@@ -206,20 +217,41 @@ export class ExtractorService {
   private extractPDP(html: string, selectors: PDPSelectorMap): PDPData {
     const $ = cheerio.load(html);
 
+    // 셀렉터가 객체 형태인 경우 문자열로 변환
+    const getSelector = (value: string | { selectors?: string[] } | undefined): string | undefined => {
+      if (!value) return undefined;
+      if (typeof value === 'string') return value;
+      if (typeof value === 'object' && value.selectors && value.selectors.length > 0) {
+        return value.selectors[0];
+      }
+      return undefined;
+    };
+
+    const productNameSelector = getSelector(selectors.productName as string | { selectors?: string[] });
+    const priceSelector = getSelector(selectors.price as string | { selectors?: string[] });
+    const brandNameSelector = getSelector(selectors.brandName as string | { selectors?: string[] });
+    const descriptionSelector = getSelector(selectors.description as string | { selectors?: string[] });
+    const optionsSelector = getSelector(selectors.options as string | { selectors?: string[] });
+    const detailImagesSelector = getSelector(selectors.detailImages as string | { selectors?: string[] });
+
     return {
-      brandName: selectors.brandName
-        ? this.extractText($, selectors.brandName)
+      brandName: brandNameSelector
+        ? this.extractText($, brandNameSelector)
         : null,
-      productName: this.extractText($, selectors.productName) || '',
-      price: this.extractText($, selectors.price) || '',
-      description: selectors.description
-        ? this.extractText($, selectors.description)
+      productName: productNameSelector
+        ? this.extractText($, productNameSelector) || ''
+        : '',
+      price: priceSelector
+        ? this.extractText($, priceSelector) || ''
+        : '',
+      description: descriptionSelector
+        ? this.extractText($, descriptionSelector)
         : null,
-      options: selectors.options
-        ? this.extractMultipleTexts($, selectors.options)
+      options: optionsSelector
+        ? this.extractMultipleTexts($, optionsSelector)
         : [],
-      detailImages: selectors.detailImages
-        ? this.extractMultipleAttrs($, selectors.detailImages)
+      detailImages: detailImagesSelector
+        ? this.extractMultipleAttrs($, detailImagesSelector)
         : [],
     };
   }
@@ -622,5 +654,100 @@ export class ExtractorService {
       quality.qualityScore >= 80 &&
       quality.priceValidProducts >= quality.totalProducts * 0.5
     );
+  }
+
+  /**
+   * PDP 추출 품질 평가
+   * - 필수 필드: productName (30점), price (30점)
+   * - 선택 필드: brandName (10점), description (10점), options (10점), detailImages (10점)
+   */
+  evaluatePDPQuality(data: PDPData): PDPExtractionQuality {
+    const scores = {
+      productName: data.productName && data.productName.trim().length > 0 ? 30 : 0,
+      price: data.price && /[\d,]+/.test(data.price) ? 30 : 0,
+      brandName: data.brandName && data.brandName.trim().length > 0 ? 10 : 0,
+      description: data.description && data.description.length > 10 ? 10 : 0,
+      options: data.options && data.options.length > 0 ? 10 : 0,
+      detailImages: data.detailImages && data.detailImages.length > 0 ? 10 : 0,
+    };
+
+    const qualityScore = Object.values(scores).reduce((a, b) => a + b, 0);
+
+    this.logger.debug(
+      `PDP quality: productName=${scores.productName > 0}, price=${scores.price > 0}, ` +
+        `brandName=${scores.brandName > 0}, description=${scores.description > 0}, ` +
+        `options=${data.options?.length || 0}, detailImages=${data.detailImages?.length || 0}, ` +
+        `score=${qualityScore}`,
+    );
+
+    return {
+      hasProductName: scores.productName > 0,
+      hasPrice: scores.price > 0,
+      hasBrandName: scores.brandName > 0,
+      hasDescription: scores.description > 0,
+      optionsCount: data.options?.length || 0,
+      detailImagesCount: data.detailImages?.length || 0,
+      qualityScore,
+    };
+  }
+
+  /**
+   * PDP 품질 기준 충족 확인
+   * - 필수: productName, price (합계 60점)
+   * - 최소 60점 이상 (필수 필드만이라도 추출 성공)
+   */
+  isPDPQualityAcceptable(quality: PDPExtractionQuality): boolean {
+    return quality.hasProductName && quality.hasPrice && quality.qualityScore >= 60;
+  }
+
+  /**
+   * PDP 품질 피드백 생성 (LLM 재시도용)
+   */
+  generatePDPQualityFeedback(
+    quality: PDPExtractionQuality,
+    selectors: PDPSelectorMap,
+  ): string {
+    const issues: string[] = [];
+
+    if (!quality.hasProductName) {
+      issues.push(
+        `상품명(productName)을 추출하지 못했습니다. 현재 셀렉터: "${selectors.productName || 'undefined'}"`,
+      );
+      issues.push(`페이지에서 상품 제목을 포함하는 h1, h2 또는 title 관련 요소를 찾아주세요.`);
+    }
+
+    if (!quality.hasPrice) {
+      issues.push(
+        `가격(price)을 추출하지 못했습니다. 현재 셀렉터: "${selectors.price || 'undefined'}"`,
+      );
+      issues.push(`"XX,XXX원" 형태의 실제 판매 가격을 포함하는 요소를 찾아주세요.`);
+      issues.push(`할인율(%)이 아닌 최종 가격 요소를 선택하세요.`);
+    }
+
+    if (quality.optionsCount === 0 && selectors.options) {
+      issues.push(`옵션을 추출하지 못했습니다. 현재 셀렉터: "${selectors.options}"`);
+      issues.push(`select 요소나 옵션 버튼 컨테이너를 확인해주세요.`);
+    }
+
+    if (quality.detailImagesCount === 0 && selectors.detailImages) {
+      issues.push(`상세 이미지를 추출하지 못했습니다. 현재 셀렉터: "${selectors.detailImages}"`);
+      issues.push(`상품 상세 영역의 img 요소들을 확인해주세요. /@src 또는 /@data-src 속성 마커를 사용하세요.`);
+    }
+
+    if (issues.length === 0) {
+      return '';
+    }
+
+    return [
+      '## 이전 분석 결과가 품질 기준을 충족하지 못했습니다.',
+      '',
+      '### 문제점:',
+      ...issues.map((i) => `- ${i}`),
+      '',
+      '### 요청사항:',
+      '- productName과 price는 필수로 추출해야 합니다.',
+      '- 가격은 반드시 "XX,XXX원" 형태의 실제 판매 가격을 추출하세요.',
+      '- 셀렉터가 실제 HTML에 존재하는 클래스/속성만 사용하세요.',
+    ].join('\n');
   }
 }
